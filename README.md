@@ -13,9 +13,9 @@ helm upgrade --install lembos oci://ghcr.io/lembosproj/charts/lembos --version 0
 
 ## What is here
 
-| Path                                       | What                                                                                                                                       |
-|--------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
-| [`charts/lembos`](./charts/lembos)         | The Helm chart: the four services, a setup job that makes every Secret and key, and PostgreSQL, Redis and Temporal — simple, highly available or external |
+| Path                                         | What                                                                                                                                                      |
+|----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`charts/lembos`](./charts/lembos)           | The Helm chart: the four services, a setup job that makes every Secret and key, and PostgreSQL, Redis and Temporal — simple, highly available or external |
 
 The [chart's README](./charts/lembos/README.md) covers prerequisites, secrets, publishing, network policies,
 the high-available options, and [running on a local k3s](./charts/lembos/README.md#running-on-a-local-k3s).
@@ -28,10 +28,10 @@ setups — internal dependencies, external ones, high-available — as a test of
 
 The chart and the platform are released apart:
 
-| Version                   | Set by                                     | Names                                                  |
-|---------------------------|--------------------------------------------|--------------------------------------------------------|
-| The chart's `version`     | A `v*` tag in this repository              | `oci://ghcr.io/lembosproj/charts/lembos`               |
-| The chart's `appVersion`  | `Chart.yaml`, changed in a reviewed change | `ghcr.io/lembosproj/<component>`, published by platform |
+| Version                     | Set by                                       | Names                                                    |
+|-----------------------------|----------------------------------------------|----------------------------------------------------------|
+| The chart's `version`       | A `v*` tag in this repository                | `oci://ghcr.io/lembosproj/charts/lembos`                 |
+| The chart's `appVersion`    | `Chart.yaml`, changed in a reviewed change   | `ghcr.io/lembosproj/<component>`, published by platform  |
 
 So a chart fix ships without a platform release, and adopting a platform release is a one-line change to
 `appVersion`. The release workflow refuses to publish a chart whose `appVersion` has no published images.

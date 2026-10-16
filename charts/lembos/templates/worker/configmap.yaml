@@ -25,6 +25,9 @@ variables from Secrets, which override anything here.
   "RoleBindings" $directory.roleBindings
   "GitHub" (dict "Enabled" .Values.platform.integrations.gitHub.enabled)) -}}
 
+{{- /* No Service and no public name: the probes are the only thing that addresses this listener. */ -}}
+{{- $_ := set $settings "AllowedHosts" (printf "%s;localhost" (include "lembos.componentName" $ctx)) -}}
+
 {{- /* Where runs work on disk is the image's business (/var/lib/lembos); how many at once is the deployment's. */ -}}
 {{- $_ := set $settings "Runs" (dict "Workspace" (dict "MaxConcurrentRuns" .Values.worker.maxConcurrentRuns)) -}}
 {{- $_ := set $settings "ConnectionStrings" (dict "temporal" (include "lembos.temporal.address" .)) -}}

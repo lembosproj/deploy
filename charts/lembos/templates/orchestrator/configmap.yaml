@@ -16,6 +16,7 @@ would revert.
   "Url" (include "lembos.origin" (dict "root" . "component" "identity"))
   "DefaultAdmin" (dict "Email" .Values.platform.userManagement.bootstrapAdmin.email)) -}}
 {{- $_ := set $settings "Cors" (dict "AllowedOrigins" (include "lembos.origin" (dict "root" . "component" "portal"))) -}}
+{{- $_ := set $settings "AllowedHosts" (include "lembos.allowedHosts" $ctx) -}}
 {{- $_ := set $settings "SampleData" (dict "Enabled" .Values.orchestrator.sampleData) -}}
 {{- $_ := set $settings "WorkflowTriggers" (include "lembos.workflowTriggerSettings" . | fromJson) -}}
 {{- $_ := set $settings "ConnectionStrings" (dict "temporal" (include "lembos.temporal.address" .)) -}}

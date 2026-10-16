@@ -86,6 +86,24 @@ imagePullSecrets:
 {{- printf "%s://%s" .root.Values.global.publicScheme (include "lembos.host" .) -}}
 {{- end -}}
 
+{{/* The names one Service answers to from inside the cluster, in the form AllowedHosts takes. {root, name} */}}
+{{- define "lembos.serviceHosts" -}}
+{{- $ns := .root.Release.Namespace -}}
+{{- printf "%s;%s.%s;%s.%s.svc;%s.%s.svc.%s" .name .name $ns .name $ns .name $ns .root.Values.global.clusterDomain -}}
+{{- end -}}
+
+{{/*
+The Host values a component serves, for ASP.NET Core's host filtering: its public hostname, the names its
+Service has inside the cluster, and loopback for kubectl port-forward. Nothing else reaches a pod on purpose,
+so a request under any other name — a mistaken ingress rule, a stray mesh route — is refused with a 400
+rather than served under a hostname the deployment never published and the services would then build
+links from. Identity's admin Service is added by its own configmap.
+*/}}
+{{- define "lembos.allowedHosts" -}}
+{{- $service := include "lembos.serviceHosts" (dict "root" .root "name" (include "lembos.componentName" .)) -}}
+{{- printf "%s;%s;localhost" (include "lembos.host" .) $service -}}
+{{- end -}}
+
 {{/* ── Secrets ── */}}
 
 {{/* The release's own Secret, which the setup job fills — or the one the operator manages instead. */}}
@@ -566,20 +584,23 @@ shareProcessNamespace: true
 
 {{/*
 Probes for a .NET service on its http port: /alive says the process answers, /health that its dependencies
-do. The startup probe allows for migrations, which run before the service reports ready.
+do. The startup probe allows for migrations, which run before the service reports ready. Each carries the
+Service name as Host, because the kubelet otherwise sends the pod's IP — a name the service's host
+filtering (lembos.allowedHosts) refuses, which would read as a service that never came up. {root, component}
 */}}
 {{- define "lembos.probes" -}}
+{{- $host := include "lembos.componentName" . -}}
 startupProbe:
-  httpGet: {path: /alive, port: http}
+  httpGet: {path: /alive, port: http, httpHeaders: [{name: Host, value: {{ $host | quote }}}]}
   periodSeconds: 5
   failureThreshold: 60
 livenessProbe:
-  httpGet: {path: /alive, port: http}
+  httpGet: {path: /alive, port: http, httpHeaders: [{name: Host, value: {{ $host | quote }}}]}
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 3
 readinessProbe:
-  httpGet: {path: /health, port: http}
+  httpGet: {path: /health, port: http, httpHeaders: [{name: Host, value: {{ $host | quote }}}]}
   periodSeconds: 10
   timeoutSeconds: 5
   failureThreshold: 3

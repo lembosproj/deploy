@@ -39,6 +39,9 @@ global:
   # -- ASPNETCORE_ENVIRONMENT for every service. Anything but Development makes the key-protection
   # certificates and the signing key required, which is the point.
   environment: Production
+  # -- The cluster's DNS domain, as the kubelet's `--cluster-domain` has it. Each service accepts requests
+  # only under its public hostname and its Service's names, and a Service's fully qualified name ends in this.
+  clusterDomain: cluster.local
 
   image:
     # -- Registry the four service images are pulled from.

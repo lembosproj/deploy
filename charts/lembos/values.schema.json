@@ -74,6 +74,7 @@
       "type": "object",
       "properties": {
         "environment": { "type": "string", "minLength": 1 },
+        "clusterDomain": { "type": "string", "minLength": 1 },
         "forwardedHeaders": {
           "type": "object",
           "additionalProperties": false,

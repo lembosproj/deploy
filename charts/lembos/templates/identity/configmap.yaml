@@ -20,6 +20,9 @@ the other services use rather than this pod's address.
     "portal" (dict "BaseUrl" $portal)
     "orchestrator" (dict "BaseUrl" $orchestrator))) -}}
 {{- $_ := set $settings "Cors" (dict "AllowedOrigins" (printf "%s;%s" $portal $orchestrator)) -}}
+{{- /* The admin Service too: the Worker reaches the account-management listener by that name. */ -}}
+{{- $admin := include "lembos.serviceHosts" (dict "root" . "name" (printf "%s-admin" (include "lembos.componentName" $ctx))) -}}
+{{- $_ := set $settings "AllowedHosts" (printf "%s;%s" (include "lembos.allowedHosts" $ctx) $admin) -}}
 
 {{- $identity := dict
   "DefaultAdmin" (dict "Email" .Values.platform.userManagement.bootstrapAdmin.email)

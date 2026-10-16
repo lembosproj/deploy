@@ -15,4 +15,6 @@ needs no public name and no TLS of its own.
 {{- $_ := set $settings "PlatformServices" (dict
   "Orchestrator" (printf "http://%s:8080" (include "lembos.componentName" (dict "root" . "component" "orchestrator")))) -}}
 
+{{- $_ := set $settings "AllowedHosts" (include "lembos.allowedHosts" $ctx) -}}
+
 {{- include "lembos.settingsConfigMap" (dict "ctx" $ctx "settings" $settings) }}

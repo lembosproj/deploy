@@ -58,7 +58,7 @@ spec:
             {{- with $values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- include "lembos.probes" . | nindent 10 }}
+          {{- include "lembos.probes" $ctx | nindent 10 }}
           resources:
             {{- toYaml $values.resources | nindent 12 }}
           volumeMounts:

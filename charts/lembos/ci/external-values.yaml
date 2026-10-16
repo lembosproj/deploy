@@ -3,6 +3,8 @@
 installMode: high-available
 global:
   domain: idp.example.org
+  forwardedHeaders:
+    knownNetworks: ["10.244.0.0/16"]
 secrets:
   existingSecret: lembos-platform
   gitHub:

@@ -1,4 +1,7 @@
 # Rendered by CI: secrets and key pairs given inline, as a throwaway installation would.
+global:
+  forwardedHeaders:
+    knownNetworks: ["10.244.0.0/16"]
 secrets:
   clientSecrets:
     portal: cG9ydGFs

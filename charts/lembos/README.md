@@ -182,6 +182,14 @@ trusted:
   `global.trustedCertificates` (a Secret or ConfigMap, and `keys` to mount only the certificate); the
   services trust it through `SSL_CERT_DIR`.
 
+**Each service answers only under the names it was given**: its public hostname, its Service's names inside
+the cluster (`<release>-<component>`, alone and with the namespace, `.svc` and `global.clusterDomain`
+suffixes) and `localhost` for `kubectl port-forward`. The chart writes that list as the service's
+`AllowedHosts`, so a request arriving under any other name — an ingress rule pointing at the wrong Service, a
+route a mesh added — is refused with a 400 rather than served under a hostname the deployment never
+published. The probes send the Service name as `Host` for the same reason. A cluster whose DNS domain is not
+`cluster.local` sets `global.clusterDomain`.
+
 **The `platform` section is checked against `values.schema.json`**, which mirrors `PlatformConfig` in
 `lembosproj/platform` key for key. A key the platform does not know fails `helm lint` and `helm install` here
 rather than reaching a service, where the strict binder would refuse it at startup — or, for a key the chart
