@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       # build, not update: exactly what Chart.lock records, digests checked, and a failure when the lock and
       # Chart.yaml disagree — so a dependency moves only in a reviewed change to both.
       - name: Fetch dependencies
@@ -70,7 +70,7 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v7
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
       - id: versions
         run: |
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
