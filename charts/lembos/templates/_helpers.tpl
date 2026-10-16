@@ -444,7 +444,11 @@ which carries the OIDC client registry and log levels — rather than replacing 
 {{- define "lembos.commonSettings" -}}
 {{- toJson (dict
   "HealthChecks" (dict "Enabled" true)
-  "UserManagement" (dict "Mode" .Values.platform.userManagement.mode)) -}}
+  "UserManagement" (dict "Mode" .Values.platform.userManagement.mode)
+  "ForwardedHeaders" (dict
+    "KnownNetworks" .Values.global.forwardedHeaders.knownNetworks
+    "KnownProxies" .Values.global.forwardedHeaders.knownProxies
+    "TrustAnySource" .Values.global.forwardedHeaders.trustAnySource)) -}}
 {{- end -}}
 
 {{/* The trigger dispatcher's settings, to the two services that hold a trigger table — as JSON. */}}

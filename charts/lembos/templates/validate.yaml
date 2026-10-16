@@ -92,3 +92,17 @@ Helm fills .Capabilities from the cluster on install and upgrade; `helm template
 {{- if and (ne .Values.global.environment "Development") (not (include "lembos.smtp.endpoint" .)) }}
 {{- fail "Identity needs somewhere to send invitations and password resets outside Development: set identity.smtp.endpoint (smtp://host:port) to a relay, or mailpit.enabled: true on a laptop." }}
 {{- end }}
+
+{{- /*
+Every service refuses to start outside Development without a source to take forwarded headers from, because
+the alternative — the loopback default — ignores the ingress and refuses every OpenID Connect request as plain
+HTTP, which reads as a broken grant rather than as the setting it is.
+*/}}
+{{- with .Values.global.forwardedHeaders }}
+{{- if and (ne $.Values.global.environment "Development") (not .trustAnySource) (not .knownNetworks) (not .knownProxies) }}
+{{- fail "The services take X-Forwarded-* headers from the ingress controller, and nothing says where it runs: set global.forwardedHeaders.knownNetworks to the pod CIDR it runs in (for example [10.244.0.0/16]), or knownProxies to its addresses — or trustAnySource: true where network policies already admit nothing else to the listeners." }}
+{{- end }}
+{{- if and .trustAnySource (or .knownNetworks .knownProxies) }}
+{{- fail "global.forwardedHeaders.trustAnySource is set beside knownNetworks or knownProxies. Name the sources, or trust any — not both." }}
+{{- end }}
+{{- end }}

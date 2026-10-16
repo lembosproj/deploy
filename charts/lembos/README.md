@@ -119,6 +119,21 @@ claims when it starts and releases when it goes (a generic ephemeral volume). On
 toolchain directory and the provider cache are single-writer; a shared volume would put several Workers
 unzipping into one path. A new pod downloads its toolchains once.
 
+**Every image is signed** when it is published, keylessly, with the identity of the workflow that built it
+(`.github/workflows/deployment-artifacts.yml` in `lembosproj/platform`, on a version tag), and the signature is
+recorded in the Rekor transparency log. Verify one before trusting it, by digest rather than by tag — a tag
+can be moved after signing and a signature over a digest cannot:
+
+```shell
+cosign verify \
+  --certificate-identity-regexp '^https://github.com/lembosproj/platform/\.github/workflows/deployment-artifacts\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/lembosproj/orchestrator:0.1.0
+```
+
+An admission controller that checks signatures (Kyverno, Sigstore's policy controller) takes the same two
+values; the regular expression is what stops an image signed by another repository's workflow from passing.
+
 ## Releases
 
 The chart and the platform are versioned apart. `version` is the chart's own and comes from this
@@ -166,6 +181,12 @@ trusted:
 - **Trust.** A publicly trusted certificate needs nothing. A private CA goes in
   `global.trustedCertificates` (a Secret or ConfigMap, and `keys` to mount only the certificate); the
   services trust it through `SSL_CERT_DIR`.
+
+**The `platform` section is checked against `values.schema.json`**, which mirrors `PlatformConfig` in
+`lembosproj/platform` key for key. A key the platform does not know fails `helm lint` and `helm install` here
+rather than reaching a service, where the strict binder would refuse it at startup — or, for a key the chart
+distributes itself, be ignored and leave the platform on its default with nothing saying so. A setting added to
+`PlatformConfig` is added to `values.yaml` and to the schema in the same change.
 
 ## Secrets and keys
 
@@ -239,6 +260,13 @@ set its equivalent in `<component>.ingress.annotations`.
 
 **More than one Portal replica** needs sticky sessions — a circuit lives in the replica that started it.
 `values-ha.yaml` shows the ingress-nginx annotations.
+
+**Where the controller runs** has to be stated: `global.forwardedHeaders.knownNetworks` (the pod CIDR it runs
+in) or `knownProxies` (its fixed addresses). The services rewrite each request's scheme, host and client
+address from the `X-Forwarded-*` headers, and take them only from these sources — anything else on the cluster
+network could otherwise present itself as any address, which is what Identity rate-limits by. The install
+refuses to render outside Development with nothing named. `trustAnySource: true` keeps the old behaviour and is
+right only where the network policies already admit nothing but the controller to the listeners.
 
 **Identity's admin listener** is never published. It is a second port on the Identity pod with its own
 ClusterIP Service, `<release>-identity-admin`, which no Ingress or HTTPRoute references and whose

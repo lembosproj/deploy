@@ -39,7 +39,8 @@ jobs:
       # Every values file the chart ships or tests with, rendered and checked against the Kubernetes schemas
       # strictly — a key the API server would drop silently is a failure here. The defaults are
       # ci/default-values.yaml, because the chart refuses to render without somewhere to send mail.
-      # values-ha.yaml asks for a relay on the command line, so it is given one here. The API versions stand
+      # values-ha.yaml asks for a relay and the ingress controller's network on the command line, so it is given
+      # both here. The API versions stand
       # in for the operators and CRDs a cluster would have: the chart checks for them before rendering
       # resources of their kinds, and a render has no cluster to ask.
       - name: Lint and validate
@@ -49,7 +50,7 @@ jobs:
           for values in charts/lembos/values-k3s.yaml charts/lembos/values-ha.yaml charts/lembos/ci/*.yaml; do
             echo "::group::$values"
             relay=()
-            [[ "$values" == *values-ha.yaml ]] && relay=(--set-string identity.smtp.endpoint=smtp://relay.example.org:25)
+            [[ "$values" == *values-ha.yaml ]] && relay=(--set-string identity.smtp.endpoint=smtp://relay.example.org:25 --set 'global.forwardedHeaders.knownNetworks={10.244.0.0/16}')
             helm template lembos charts/lembos --namespace lembos -f "$values" "${relay[@]}" \
               --api-versions postgresql.cnpg.io/v1/Cluster --api-versions postgresql.cnpg.io/v1/Database \
               --api-versions gateway.networking.k8s.io/v1/HTTPRoute \

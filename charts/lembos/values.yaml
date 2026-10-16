@@ -75,6 +75,17 @@ global:
   # the services call Identity at its public origin, because that origin is the token issuer they validate.
   hostAliases: []
 
+  # -- Where the services take X-Forwarded-* headers from: the ingress controller's or gateway's pods. The
+  # headers rewrite a request's scheme, host and client address, so a source the services trust can say it
+  # is anyone — the address Identity rate-limits by, the client an audit entry records. Name the pod CIDR the
+  # controller runs in (`knownNetworks`, CIDR notation) or its fixed addresses (`knownProxies`). Required
+  # outside Development: the services refuse to start with nothing named. `trustAnySource: true` is the old
+  # behaviour, right only where network policies already admit nothing but the controller to the listeners.
+  forwardedHeaders:
+    knownNetworks: []
+    knownProxies: []
+    trustAnySource: false
+
   # -- A Secret or ConfigMap holding extra CA certificates (PEM files) the services should trust — needed when
   # the ingress certificate is issued by a private CA, since the services reach Identity through it.
   trustedCertificates:

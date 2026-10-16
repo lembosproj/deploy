@@ -1,4 +1,9 @@
-# Rendered by CI: the chart's defaults, plus the one value that has none — where Identity sends mail.
+# Rendered by CI: the chart's defaults, plus the two values that have none — where Identity sends mail, and
+# where the ingress controller runs.
+global:
+  forwardedHeaders:
+    knownNetworks: ["10.244.0.0/16"]
+
 identity:
   smtp:
     endpoint: smtp://relay.example.org:25
