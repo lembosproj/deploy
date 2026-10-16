@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       # build, not update: exactly what Chart.lock records, digests checked, and a failure when the lock and
       # Chart.yaml disagree — so a dependency moves only in a reviewed change to both.
@@ -69,7 +69,7 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: azure/setup-helm@v4
       - id: versions
         run: |
