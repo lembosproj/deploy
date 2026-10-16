@@ -84,6 +84,14 @@ Helm fills .Capabilities from the cluster on install and upgrade; `helm template
 {{- end }}
 {{- end }}
 
+{{- if not (has .Values.worker.autoscaling.scaler (list "hpa" "keda")) }}
+{{- fail (printf "worker.autoscaling.scaler is '%s'; it is hpa or keda." .Values.worker.autoscaling.scaler) }}
+{{- end }}
+
+{{- if and (eq .Values.worker.autoscaling.scaler "keda") (include "lembos.autoscaling" (dict "root" . "component" "worker")) (not (.Capabilities.APIVersions.Has "keda.sh/v1alpha1/ScaledObject")) }}
+{{- fail "worker.autoscaling.scaler is keda, and this cluster has no keda.sh/v1alpha1 ScaledObject. Install KEDA 2.17 or later, or set the scaler to hpa. Rendering without a cluster? Pass --api-versions keda.sh/v1alpha1/ScaledObject." }}
+{{- end }}
+
 {{- if and .Values.gateway.enabled (not (.Capabilities.APIVersions.Has "gateway.networking.k8s.io/v1/HTTPRoute")) }}
 {{- fail "gateway.enabled renders Gateway API HTTPRoutes, and this cluster has no gateway.networking.k8s.io/v1 HTTPRoute. Install the Gateway API CRDs (and a Gateway implementation), or publish through ingress.enabled instead. Rendering without a cluster? Pass --api-versions gateway.networking.k8s.io/v1/HTTPRoute." }}
 {{- end }}

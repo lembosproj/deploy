@@ -38,7 +38,7 @@ identity:
 orchestrator:
   autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetMemoryUtilizationPercentage: 80}
 worker:
-  autoscaling: {enabled: true}
+  autoscaling: {enabled: true, scaler: keda}
 postgresql:
   mode: external
   external:

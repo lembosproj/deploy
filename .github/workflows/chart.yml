@@ -27,8 +27,8 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: azure/setup-helm@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       # build, not update: exactly what Chart.lock records, digests checked, and a failure when the lock and
       # Chart.yaml disagree — so a dependency moves only in a reviewed change to both.
       - name: Fetch dependencies
@@ -54,11 +54,30 @@ jobs:
             helm template lembos charts/lembos --namespace lembos -f "$values" "${relay[@]}" \
               --api-versions postgresql.cnpg.io/v1/Cluster --api-versions postgresql.cnpg.io/v1/Database \
               --api-versions gateway.networking.k8s.io/v1/HTTPRoute \
+              --api-versions keda.sh/v1alpha1/ScaledObject \
               | "$(go env GOPATH)/bin/kubeconform" -strict -summary -kubernetes-version 1.33.0 \
                   -schema-location default \
                   -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
             echo "::endgroup::"
           done
+
+      # The `platform` section of values.schema.json is a copy of the platform's generated contract, which the
+      # platform's release publishes as a public OCI artifact beside its images — public, so this pulls it
+      # anonymously while the platform repository stays private. Compared here so a setting the platform
+      # added, or renamed, cannot sit unknown to the chart: scripts/sync-platform-schema.sh refreshes the copy.
+      # A release that published no contract has nothing to compare, which is said rather than failed; the
+      # chart's own release fails on it, below.
+      - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
+      - name: Compare the platform contract
+        run: |
+          version="$(yq '.appVersion' charts/lembos/Chart.yaml)"
+          artifact="ghcr.io/${{ github.repository_owner }}/platform/values-schema:${version}"
+          if ! oras pull "$artifact" -o platform-contract; then
+            echo "::warning::${artifact} is not published, or not public; the platform section was not compared."
+            exit 0
+          fi
+          diff <(jq -S .properties.platform charts/lembos/values.schema.json) <(jq -S . platform-contract/platform-values.schema.json) \
+            || { echo "::error::values.schema.json's platform section differs from the platform contract at ${version}. Run scripts/sync-platform-schema.sh and commit the result."; exit 1; }
 
   release:
     name: Release
@@ -70,22 +89,27 @@ jobs:
       contents: write
       packages: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: azure/setup-helm@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
       - id: versions
         run: |
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           echo "app=$(yq '.appVersion' charts/lembos/Chart.yaml)" >> "$GITHUB_OUTPUT"
       # The chart names these by default; publishing it before they exist would publish a chart that cannot
       # pull what it installs. Anonymous on purpose: a cluster pulls them without credentials too.
-      - name: Platform images exist
+      - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
+      - name: Platform images and contract exist
         env:
           APP_VERSION: ${{ steps.versions.outputs.app }}
         run: |
           for image in identity orchestrator portal worker setup; do
-            docker manifest inspect "ghcr.io/${{ github.repository_owner }}/$image:$APP_VERSION" > /dev/null \
-              || { echo "::error::ghcr.io/${{ github.repository_owner }}/$image:$APP_VERSION is not published, or not public."; exit 1; }
+            docker manifest inspect "ghcr.io/${{ github.repository_owner }}/platform/$image:$APP_VERSION" > /dev/null \
+              || { echo "::error::ghcr.io/${{ github.repository_owner }}/platform/$image:$APP_VERSION is not published, or not public."; exit 1; }
           done
+          # And the contract this chart's platform section was copied from: a chart released against a
+          # platform that published none cannot have been compared, so it is not released.
+          oras manifest fetch --descriptor "ghcr.io/${{ github.repository_owner }}/platform/values-schema:$APP_VERSION" > /dev/null \
+            || { echo "::error::ghcr.io/${{ github.repository_owner }}/platform/values-schema:$APP_VERSION is not published, or not public."; exit 1; }
       # The tag decides the chart's version, so Chart.yaml's version never has to be bumped to cut one.
       - name: Package the chart
         run: |
@@ -116,7 +140,7 @@ jobs:
             --namespace lembos --create-namespace --set global.domain=<your domain>
           \`\`\`
 
-          Installs Lembos ${APP_VERSION}: \`ghcr.io/${owner}/{identity,orchestrator,portal,worker,setup}:${APP_VERSION}\`
+          Installs Lembos ${APP_VERSION}: \`ghcr.io/${owner}/platform/{identity,orchestrator,portal,worker,setup}:${APP_VERSION}\`
           NOTES
           gh release create "$GITHUB_REF_NAME" "dist/lembos-${VERSION}.tgz" \
             --title "Lembos chart ${VERSION}" --notes-file notes.md --generate-notes --verify-tag "${prerelease[@]}"

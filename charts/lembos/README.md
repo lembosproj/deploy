@@ -32,6 +32,7 @@ to send invitations and password resets, so the chart refuses to render first.
 | `postgresql.mode: high-available`            | The CloudNativePG operator, 1.25 or later                    | Yes                  |
 | `gateway.enabled`                            | Gateway API CRDs (`gateway.networking.k8s.io/v1`)            | Yes                  |
 | Autoscaling (on in a high-available install) | A metrics server                                             | —                    |
+| `worker.autoscaling.scaler: keda`            | KEDA 2.17 or later                                           | Yes                  |
 
 **High-available PostgreSQL is a CloudNativePG cluster**, and the operator is the one thing this chart cannot
 bring with it. The chart renders the `Cluster` and the `Database` resources; the operator, installed once per
@@ -73,7 +74,7 @@ high-available install with a simple dependency fails to render, because two of 
 PostgreSQL pod is still one pod from an outage.
 
 The `platform` section of [`values.yaml`](./values.yaml) mirrors
-[`PlatformConfig`](https://github.com/lembosproj/platform/blob/main/src/Lembos.AppHost/Platform/PlatformConfig.cs), the platform's configuration contract.
+[`PlatformConfig`](https://github.com/lembosproj/platform/blob/main/src/AppHost/Lembos.AppHost/Platform/PlatformConfig.cs), the platform's configuration contract.
 The app host distributes each of its settings to the components that act on it
 (`PlatformConfiguration.Build`), and these templates do the same distribution — so a setting means the same
 thing under `aspire start` and in a cluster.
@@ -102,7 +103,7 @@ The five images are built and published by [lembosproj/platform](https://github.
 one per version tag there, as public packages:
 
 ```text
-ghcr.io/lembosproj/{identity,orchestrator,portal,worker,setup}:<appVersion>
+ghcr.io/lembosproj/platform/{identity,orchestrator,portal,worker,setup}:<appVersion>
 ```
 
 The chart pulls the tag its `appVersion` names unless `global.image.tag`, or a component's own `image.tag`,
@@ -128,7 +129,7 @@ can be moved after signing and a signature over a digest cannot:
 cosign verify \
   --certificate-identity-regexp '^https://github.com/lembosproj/platform/\.github/workflows/deployment-artifacts\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/lembosproj/orchestrator:0.1.0
+  ghcr.io/lembosproj/platform/orchestrator:0.1.0
 ```
 
 An admission controller that checks signatures (Kyverno, Sigstore's policy controller) takes the same two
@@ -190,18 +191,23 @@ route a mesh added — is refused with a 400 rather than served under a hostname
 published. The probes send the Service name as `Host` for the same reason. A cluster whose DNS domain is not
 `cluster.local` sets `global.clusterDomain`.
 
-**The `platform` section is checked against `values.schema.json`**, which mirrors `PlatformConfig` in
-`lembosproj/platform` key for key. A key the platform does not know fails `helm lint` and `helm install` here
-rather than reaching a service, where the strict binder would refuse it at startup — or, for a key the chart
-distributes itself, be ignored and leave the platform on its default with nothing saying so. A setting added to
-`PlatformConfig` is added to `values.yaml` and to the schema in the same change.
+**The `platform` section is checked against `values.schema.json`**, whose `platform` property is the
+platform's own contract: `lembosproj/platform` generates `contracts/platform-values.schema.json` from
+`PlatformConfig`, its release publishes the file as a public OCI artifact beside the images
+(`ghcr.io/lembosproj/platform/values-schema:<version>`), and `scripts/sync-platform-schema.sh` (which needs
+`oras`) copies it here at the release `appVersion` names. A key the platform does not know fails `helm lint`
+and `helm install` rather than reaching a service, where the strict binder would refuse it at startup — or,
+for a key the chart distributes itself, be ignored and leave the platform on its default with nothing saying
+so. The chart workflow compares the copy with the artifact, and the chart's release refuses a platform that
+published none, so a setting the platform added reaches this chart's `values.yaml` and templates in the same
+change that bumps `appVersion`.
 
 ## Secrets and keys
 
 ### The setup job
 
 Every Secret the release needs is made by the setup job
-([`Lembos.Setup`](https://github.com/lembosproj/platform/tree/main/src/Lembos.Setup)), a
+([`Lembos.Setup`](https://github.com/lembosproj/platform/tree/main/src/Setup/Lembos.Setup)), a
 `pre-install`/`pre-upgrade` hook — PreSync under Argo CD — that runs before anything reads one. Each value is resolved in this order:
 
 1. an `existingSecret` you manage (Sealed Secrets, External Secrets, SOPS) — the job leaves it alone;
@@ -291,6 +297,36 @@ kubectl -n lembos port-forward svc/lembos-temporal-ui 8080:8080
 `temporal.ui.ingress.enabled` publishes it at `temporal.<domain>` through the same ingress as everything
 else — right on a laptop, and anywhere else only when that ingress is internal. List who else may connect
 in `networkPolicy.temporalWeb.from`.
+
+## Scaling the Worker
+
+A run is a `terraform` or `helm` process plus what it links, and its cost is a property of the pod it lands
+on. Two settings decide how many runs a pod takes, and one decides how many pods there are.
+
+**How many runs a pod takes** is `worker.maxConcurrentRuns` at most, and beneath that whatever
+`worker.capacity` admits: a run is taken only while the container's CPU and memory are under the targets, as
+fractions of the limits in `worker.resources`, and the workspace volume has `minimumFreeDiskMegabytes` left
+after `reservedDiskPerRunMegabytes` for every run in flight. The first run is admitted on the disk check
+alone. A run held back stays on its Temporal queue — it costs the pod nothing and counts as backlog.
+
+| Value                                          | Default   | Meaning                                                              |
+|------------------------------------------------|-----------|----------------------------------------------------------------------|
+| `worker.maxConcurrentRuns`                     | 4         | The ceiling, whatever the measurements say                           |
+| `worker.capacity.targetCpuUsage`               | 0.8       | Admit while CPU is under this fraction of the pod's quota            |
+| `worker.capacity.targetMemoryUsage`            | 0.8       | Admit while memory is under this fraction of the pod's limit         |
+| `worker.capacity.minimumFreeDiskMegabytes`     | 1024      | Never go below this on the workspace volume                          |
+| `worker.capacity.reservedDiskPerRunMegabytes`  | 512       | What a run in flight may still write                                 |
+| `worker.cacheRetention`                        | 30 days   | Evict cached providers and tool versions no run has used for this    |
+
+**How many pods there are** is `worker.autoscaling`, on in a high-available install. `scaler: hpa` is a
+HorizontalPodAutoscaler on CPU and memory, which cannot see runs held back for memory or disk. `scaler: keda`
+renders a KEDA `ScaledObject` instead, with a trigger per execution queue — the runs waiting on
+`execution-terraform` and `execution-helm`, `keda.targetQueueSize` per pod — and the same CPU and memory
+beside them, so the fleet grows from exactly what the pods hold back. It needs KEDA 2.17 or later, and the
+chart refuses it on a cluster without the CRD. A Temporal reached over TLS or with an API key takes a
+`TriggerAuthentication` in the release's namespace, named in `keda.triggerAuthentication`. Scale-down keeps
+the ten-minute stabilisation either way: a pod removed mid-apply hands its run to another, which starts it
+again.
 
 ## Network policies
 

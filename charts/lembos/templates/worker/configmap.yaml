@@ -29,7 +29,16 @@ variables from Secrets, which override anything here.
 {{- $_ := set $settings "AllowedHosts" (printf "%s;localhost" (include "lembos.componentName" $ctx)) -}}
 
 {{- /* Where runs work on disk is the image's business (/var/lib/lembos); how many at once is the deployment's. */ -}}
-{{- $_ := set $settings "Runs" (dict "Workspace" (dict "MaxConcurrentRuns" .Values.worker.maxConcurrentRuns)) -}}
+{{- /* The ceiling and the caches' retention, then what the pod measures beneath the ceiling (ADR012). */ -}}
+{{- $_ := set $settings "Runs" (dict
+  "Workspace" (dict
+    "MaxConcurrentRuns" .Values.worker.maxConcurrentRuns
+    "CacheRetention" .Values.worker.cacheRetention)
+  "Capacity" (dict
+    "TargetCpuUsage" .Values.worker.capacity.targetCpuUsage
+    "TargetMemoryUsage" .Values.worker.capacity.targetMemoryUsage
+    "MinimumFreeDiskMegabytes" .Values.worker.capacity.minimumFreeDiskMegabytes
+    "ReservedDiskPerRunMegabytes" .Values.worker.capacity.reservedDiskPerRunMegabytes)) -}}
 {{- $_ := set $settings "ConnectionStrings" (dict "temporal" (include "lembos.temporal.address" .)) -}}
 
 {{- include "lembos.settingsConfigMap" (dict "ctx" $ctx "settings" $settings) }}

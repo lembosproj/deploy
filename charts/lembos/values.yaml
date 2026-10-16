@@ -1,6 +1,6 @@
 # Lembos — Helm values.
 #
-# The `platform` section below mirrors PlatformConfig (src/Lembos.AppHost/Platform/PlatformConfig.cs in
+# The `platform` section below mirrors PlatformConfig (src/AppHost/Lembos.AppHost/Platform/PlatformConfig.cs in
 # lembosproj/platform), the platform's configuration contract. The app host distributes each setting to the
 # components that act on it (PlatformConfiguration.Build); this chart's templates do the same distribution,
 # so a setting changed here reaches the same components it would under `aspire start`.
@@ -239,7 +239,7 @@ certificates:
 # start. Its ServiceAccount may read, create and patch Secrets in the release namespace, and nothing else.
 setup:
   image:
-    repository: lembosproj/setup
+    repository: lembosproj/platform/setup
     tag: ""
   resources:
     requests: {cpu: 50m, memory: 64Mi}
@@ -323,7 +323,7 @@ identity:
   # -- Full public hostname. Default: identity.<global.domain>.
   host: ""
   image:
-    repository: lembosproj/identity
+    repository: lembosproj/platform/identity
     tag: ""
   # -- The account-management listener. Internal only: a ClusterIP Service reachable from the Worker alone,
   # never published, and the port Identity checks every admin request arrived on.
@@ -367,7 +367,7 @@ orchestrator:
   replicas: ~
   host: ""
   image:
-    repository: lembosproj/orchestrator
+    repository: lembosproj/platform/orchestrator
     tag: ""
   # -- Seed the Northwind Retail sample catalog. Off outside Development, deliberately.
   sampleData: false
@@ -405,7 +405,7 @@ portal:
   replicas: ~
   host: ""
   image:
-    repository: lembosproj/portal
+    repository: lembosproj/platform/portal
     tag: ""
   env: []
   resources:
@@ -439,10 +439,22 @@ worker:
   # -- Empty follows installMode: 1, or 2 when high-available. Ignored while autoscaling.
   replicas: ~
   image:
-    repository: lembosproj/worker
+    repository: lembosproj/platform/worker
     tag: ""
-  # -- Runs one pod executes at once.
+  # -- The most runs one pod executes at once. Beneath it, `capacity` decides from what the container is
+  # using whether another is admitted.
   maxConcurrentRuns: 4
+  # -- What a pod measures before admitting another run: the container's CPU and memory as fractions of the
+  # limits in `resources`, and the workspace volume's free space. A run held back stays on the Temporal
+  # queue, which is what `autoscaling.scaler: keda` scales the fleet on.
+  capacity:
+    targetCpuUsage: 0.8
+    targetMemoryUsage: 0.8
+    minimumFreeDiskMegabytes: 1024
+    reservedDiskPerRunMegabytes: 512
+  # -- How long a cached provider version or tool version is kept after a run last used it, as a .NET
+  # TimeSpan. Bounds the two caches on the workspace volume.
+  cacheRetention: "30.00:00:00"
   # -- Each pod's workspace — runs, the pinned Terraform and Helm binaries, the provider cache — on a volume
   # claimed with the pod and deleted with it (a generic ephemeral volume). One per pod, because the toolchain
   # directory and the provider cache are single-writer; a volume rather than an emptyDir, because a provider
@@ -461,10 +473,24 @@ worker:
   # high-available.
   autoscaling:
     enabled: ~
+    # -- `hpa`: a HorizontalPodAutoscaler on CPU and memory. `keda`: a KEDA ScaledObject that also scales on
+    # the runs waiting on the two execution queues — what pods holding runs back on their own capacity
+    # produce — with CPU and memory beside it. Needs KEDA 2.17 or later; the chart refuses to render without
+    # its CRD.
+    scaler: hpa
     minReplicas: 2
     maxReplicas: 3
     targetCPUUtilizationPercentage: 75
     targetMemoryUtilizationPercentage: ""
+    keda:
+      # -- Waiting runs per pod before another pod is added.
+      targetQueueSize: 2
+      # -- Waiting runs that wake the fleet from minReplicas; 0 reacts to the first.
+      activationTargetQueueSize: 0
+      pollingInterval: 15
+      cooldownPeriod: 600
+      # -- A TriggerAuthentication in this namespace, for a Temporal reached over TLS or with an API key.
+      triggerAuthentication: ""
     # -- Slow to scale down: a pod removed mid-apply hands its run to another pod, which starts it again.
     behavior:
       scaleDown:
@@ -629,13 +655,13 @@ temporal:
   simple:
     image:
       repository: docker.io/temporalio/auto-setup
-      # Kept equal to the app host's (src/Lembos.AppHost/Extensions/TemporalResource.cs).
+      # Kept equal to the app host's (src/AppHost/Lembos.AppHost/Extensions/TemporalResource.cs).
       tag: "1.29"
       pullPolicy: IfNotPresent
     # -- How long a closed workflow's history is kept in the `default` namespace.
     retention: 72h
     # -- Temporal's dynamic configuration, in its own file format. Every flag defaults to off in the server,
-    # so this is what is on — see src/Lembos.AppHost/dynamicconfig/development.yaml.
+    # so this is what is on — see src/AppHost/Lembos.AppHost/dynamicconfig/development.yaml.
     dynamicConfig:
       frontend.WorkerHeartbeatsEnabled:
         - value: true

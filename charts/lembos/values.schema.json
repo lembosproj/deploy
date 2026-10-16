@@ -1,87 +1,153 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "title": "Lembos values",
-  "description": "The platform section mirrors PlatformConfig (src/Lembos.AppHost/Platform/PlatformConfig.cs in lembosproj/platform) key for key, and refuses a key the platform does not know: the services bind strictly, so a misspelled setting would otherwise leave the platform on its default with nothing saying so. Everything else is validated by the templates.",
+  "description": "The platform section is the platform's own contract, copied from lembosproj/platform's contracts/platform-values.schema.json by scripts/sync-platform-schema.sh and compared by the chart workflow. Everything else is validated by the templates.",
   "type": "object",
   "properties": {
     "platform": {
+      "title": "Lembos platform values",
+      "description": "The platform contract: every setting that spans more than one component, as PlatformConfig in lembosproj/platform declares it. Generated — see scripts/export-platform-schema.sh. Unknown keys are refused because the services bind strictly, and a misspelled key would otherwise leave a setting on its default with nothing saying so.",
       "type": "object",
-      "additionalProperties": false,
       "properties": {
         "userManagement": {
           "type": "object",
-          "additionalProperties": false,
           "properties": {
-            "mode": { "type": "string", "enum": ["SelfManaged", "DirectorySourced"] },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "SelfManaged",
+                "DirectorySourced"
+              ]
+            },
             "bootstrapAdmin": {
               "type": "object",
-              "additionalProperties": false,
               "properties": {
-                "email": { "type": "string", "minLength": 3 }
-              }
+                "email": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
             }
-          }
+          },
+          "additionalProperties": false
         },
         "directory": {
           "type": "object",
-          "additionalProperties": false,
           "properties": {
-            "provider": { "type": "string", "minLength": 1 },
-            "syncInterval": { "$ref": "#/definitions/timeSpan" },
-            "roleBindings": {
-              "type": "object",
-              "additionalProperties": { "type": "string", "enum": ["Contributor", "Maintainer", "Administrator"] }
+            "provider": {
+              "type": "string"
+            },
+            "syncInterval": {
+              "$comment": "Represents a System.TimeSpan value.",
+              "type": "string",
+              "pattern": "^-?(\\d+\\.)?\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?$"
             },
             "deprovisioning": {
               "type": "object",
-              "additionalProperties": false,
               "properties": {
-                "minimumRosterForRatio": { "type": "integer", "minimum": 0 },
-                "maxRatio": { "type": "number", "minimum": 0, "maximum": 1 },
-                "maxAbsolute": { "type": "integer", "minimum": 0 }
+                "minimumRosterForRatio": {
+                  "type": "integer"
+                },
+                "maxRatio": {
+                  "type": "number"
+                },
+                "maxAbsolute": {
+                  "type": "integer"
+                }
+              },
+              "additionalProperties": false
+            },
+            "roleBindings": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
               }
             }
-          }
+          },
+          "additionalProperties": false
         },
         "integrations": {
           "type": "object",
-          "additionalProperties": false,
           "properties": {
             "gitHub": {
               "type": "object",
-              "additionalProperties": false,
               "properties": {
-                "enabled": { "type": "boolean" }
-              }
+                "enabled": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
             }
-          }
+          },
+          "additionalProperties": false
         },
         "workflowTriggers": {
           "type": "object",
-          "additionalProperties": false,
           "properties": {
-            "enabled": { "type": "boolean" },
-            "pollInterval": { "$ref": "#/definitions/timeSpan" },
-            "batchSize": { "type": "integer", "minimum": 1 },
-            "leaseDuration": { "$ref": "#/definitions/timeSpan" },
-            "initialRetryDelay": { "$ref": "#/definitions/timeSpan" },
-            "maximumRetryDelay": { "$ref": "#/definitions/timeSpan" }
-          }
+            "enabled": {
+              "type": "boolean"
+            },
+            "pollInterval": {
+              "$comment": "Represents a System.TimeSpan value.",
+              "type": "string",
+              "pattern": "^-?(\\d+\\.)?\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?$"
+            },
+            "batchSize": {
+              "type": "integer"
+            },
+            "leaseDuration": {
+              "$comment": "Represents a System.TimeSpan value.",
+              "type": "string",
+              "pattern": "^-?(\\d+\\.)?\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?$"
+            },
+            "initialRetryDelay": {
+              "$comment": "Represents a System.TimeSpan value.",
+              "type": "string",
+              "pattern": "^-?(\\d+\\.)?\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?$"
+            },
+            "maximumRetryDelay": {
+              "$comment": "Represents a System.TimeSpan value.",
+              "type": "string",
+              "pattern": "^-?(\\d+\\.)?\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,7})?$"
+            }
+          },
+          "additionalProperties": false
         }
-      }
+      },
+      "additionalProperties": false
     },
     "global": {
       "type": "object",
       "properties": {
-        "environment": { "type": "string", "minLength": 1 },
-        "clusterDomain": { "type": "string", "minLength": 1 },
+        "environment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "clusterDomain": {
+          "type": "string",
+          "minLength": 1
+        },
         "forwardedHeaders": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "knownNetworks": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-fA-F.:]+/[0-9]{1,3}$" } },
-            "knownProxies": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-            "trustAnySource": { "type": "boolean" }
+            "knownNetworks": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[0-9a-fA-F.:]+/[0-9]{1,3}$"
+              }
+            },
+            "knownProxies": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "trustAnySource": {
+              "type": "boolean"
+            }
           }
         }
       }

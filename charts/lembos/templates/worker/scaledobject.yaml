@@ -1,0 +1,59 @@
+{{- /*
+The Worker's fleet scaled on what admission produces: runs waiting on the two execution queues, with the
+pod's CPU and memory beside them. A pod holds a run back when its own capacity says so (worker.capacity), and
+a held run is backlog Temporal reports per queue — so the two compose: the pod says how much it can carry, the
+fleet grows when that is not enough. KEDA makes the HorizontalPodAutoscaler itself; hpa.yaml skips the Worker
+when this renders.
+*/ -}}
+{{- $ctx := dict "root" . "component" "worker" -}}
+{{- $values := .Values.worker -}}
+{{- if and (include "lembos.autoscaling" $ctx) (eq (default "hpa" $values.autoscaling.scaler) "keda") }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "lembos.componentName" $ctx }}
+  minReplicaCount: {{ $values.autoscaling.minReplicas }}
+  maxReplicaCount: {{ $values.autoscaling.maxReplicas }}
+  pollingInterval: {{ $values.autoscaling.keda.pollingInterval }}
+  cooldownPeriod: {{ $values.autoscaling.keda.cooldownPeriod }}
+  {{- with $values.autoscaling.behavior }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        {{- toYaml . | nindent 8 }}
+  {{- end }}
+  triggers:
+    {{- /* One trigger per execution queue: a run is an activity on the queue of the tool that applies it. */}}
+    {{- range $queue := list "execution-terraform" "execution-helm" }}
+    - type: temporal
+      metadata:
+        endpoint: {{ include "lembos.temporal.address" $ | quote }}
+        namespace: default
+        taskQueue: {{ $queue | quote }}
+        queueTypes: activity
+        targetQueueSize: {{ $values.autoscaling.keda.targetQueueSize | quote }}
+        activationTargetQueueSize: {{ $values.autoscaling.keda.activationTargetQueueSize | quote }}
+      {{- with $values.autoscaling.keda.triggerAuthentication }}
+      authenticationRef:
+        name: {{ . }}
+      {{- end }}
+    {{- end }}
+    {{- with $values.autoscaling.targetCPUUtilizationPercentage }}
+    - type: cpu
+      metricType: Utilization
+      metadata:
+        value: {{ . | quote }}
+    {{- end }}
+    {{- with $values.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: memory
+      metricType: Utilization
+      metadata:
+        value: {{ . | quote }}
+    {{- end }}
+{{- end }}

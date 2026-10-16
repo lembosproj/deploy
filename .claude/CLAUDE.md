@@ -1,7 +1,7 @@
 # Lembos deploy — guide for Claude
 
 Installs Lembos, whose source lives in [lembosproj/platform](https://github.com/lembosproj/platform). This
-repository never builds an image: the chart pulls `ghcr.io/lembosproj/<component>:<appVersion>`, which the
+repository never builds an image: the chart pulls `ghcr.io/lembosproj/platform/<component>:<appVersion>`, which the
 platform publishes. Read [README.md](./README.md) for the layout and the versioning.
 
 ## Commands

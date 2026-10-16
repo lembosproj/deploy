@@ -8,7 +8,8 @@ and every replica of Identity and the Orchestrator applies migrations at startup
 {{- $values := index $.Values $component }}
 {{- $ctx := dict "root" $ "component" $component }}
 {{- with $values.autoscaling }}
-{{- if include "lembos.autoscaling" $ctx }}
+{{- /* KEDA renders its own HorizontalPodAutoscaler for the Worker; two would fight over the replica count. */}}
+{{- if and (include "lembos.autoscaling" $ctx) (not (and (eq $component "worker") (eq (default "hpa" .scaler) "keda"))) }}
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

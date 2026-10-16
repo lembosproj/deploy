@@ -1,5 +1,7 @@
 version: 2
 updates:
+  # Pinned to a commit, with the release it was beside it: a tag can be moved to point at anything, a commit
+  # cannot. Dependabot moves the commit and rewrites the comment together.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
