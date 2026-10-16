@@ -1,0 +1,29 @@
+{{- if .Values.networkPolicy.create }}
+{{- $ctx := dict "root" . "component" "portal" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- include "lembos.ingressControllerPeer" . | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.redisEgress" . | nindent 4 }}
+    - to:
+        {{- include "lembos.peer" (dict "root" . "component" "orchestrator") | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8080}
+    # Identity at its public origin: discovery, the code exchange, refresh.
+    {{- include "lembos.publicOriginEgress" . | nindent 4 }}
+{{- end }}

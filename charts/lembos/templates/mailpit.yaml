@@ -1,0 +1,114 @@
+{{- /*
+A mail catcher, as `aspire start` runs one. Identity sends to it unless identity.smtp.endpoint names a real
+relay, so invitations and password resets are followable on a laptop without a mail provider.
+*/ -}}
+{{- if .Values.mailpit.enabled }}
+{{- $ctx := dict "root" . "component" "mailpit" -}}
+{{- $values := .Values.mailpit -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "lembos.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: smtp
+      port: 1025
+      targetPort: smtp
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mailpit
+          image: {{ include "lembos.image" $values.image }}
+          imagePullPolicy: {{ $values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          args:
+            - --smtp
+            - 0.0.0.0:1025
+            - --listen
+            - 0.0.0.0:8080
+          ports:
+            - name: smtp
+              containerPort: 1025
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet: {path: /readyz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /livez, port: http}
+            periodSeconds: 20
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          # Its inbox is a SQLite file in /tmp. An emptyDir, so a restart empties it — which is what a mail
+          # catcher's inbox is for — and the root filesystem stays read-only.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- if .Values.networkPolicy.create }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- include "lembos.peer" (dict "root" . "component" "identity") | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 1025}
+    {{- if $values.ingress.enabled }}
+    - from:
+        {{- include "lembos.ingressControllerPeer" . | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8080}
+    {{- end }}
+  egress: []
+{{- end }}
+{{- end }}

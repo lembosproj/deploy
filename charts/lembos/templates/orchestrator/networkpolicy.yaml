@@ -1,0 +1,30 @@
+{{- if .Values.networkPolicy.create }}
+{{- $ctx := dict "root" . "component" "orchestrator" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Browsers and API clients through the ingress controller; the Portal and the Worker in-cluster.
+    - from:
+        {{- include "lembos.ingressControllerPeer" . | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "portal") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "worker") | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8080}
+  egress:
+    {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.postgresqlEgress" . | nindent 4 }}
+    {{- include "lembos.redisEgress" . | nindent 4 }}
+    {{- include "lembos.temporalEgress" . | nindent 4 }}
+    # Identity at its public origin, and the cloud APIs execution-target sessions are brokered against.
+    {{- include "lembos.publicOriginEgress" . | nindent 4 }}
+{{- end }}

@@ -1,0 +1,93 @@
+{{- $ctx := dict "root" . "component" "identity" -}}
+{{- $values := .Values.identity -}}
+{{- $secrets := include "lembos.secretName" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not (include "lembos.autoscaling" $ctx) }}
+  replicas: {{ include "lembos.replicas" $ctx }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+        {{- with .Values.global.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/identity/configmap.yaml") . | sha256sum }}
+        {{- with (merge (deepCopy $values.podAnnotations) .Values.global.podAnnotations) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "lembos.componentName" $ctx }}
+      automountServiceAccountToken: false
+      {{- include "lembos.dotnetProcess" . | nindent 6 }}
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- include "lembos.scheduling" (dict "root" . "values" $values "component" "identity") | nindent 6 }}
+      containers:
+        - name: identity
+          image: {{ include "lembos.serviceImage" (dict "root" . "image" $values.image) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: admin
+              containerPort: {{ $values.adminPort }}
+              protocol: TCP
+          env:
+            {{- include "lembos.hostEnv" $ctx | nindent 12 }}
+            # The public listener, and the account-management one admin requests must arrive on.
+            - name: ASPNETCORE_HTTP_PORTS
+              value: {{ printf "8080;%v" $values.adminPort | quote }}
+            # Declared before the connection string that refers to it: dependent variables resolve in order.
+            {{- include "lembos.postgresEnv" . | nindent 12 }}
+            - name: ConnectionStrings__identity-db
+              value: {{ include "lembos.postgresql.connectionString" (dict "root" . "database" .Values.postgresql.databases.identity) | quote }}
+            {{- include "lembos.redisEnv" . | nindent 12 }}
+
+            # The secrets Identity registers for each client, and that each client authenticates with.
+            {{- range $client := list "orchestrator" "portal" "drift-reconciler" "agent-runner" "directory-synchronizer" "execution-agent" }}
+            {{- include "lembos.secretEnv" (dict "name" (printf "OpenIdConnect__Applications__%s__Secret" $client) "secret" $secrets "key" (printf "client-secret-%s" $client)) | nindent 12 }}
+            {{- end }}
+
+            {{- include "lembos.secretEnv" (dict "name" "OpenIdConnect__EncryptionKeyBase64" "secret" $secrets "key" "identity-encryption-key") | nindent 12 }}
+            {{- include "lembos.secretEnv" (dict "name" "OpenIdConnect__SigningPrivateKeyPem" "secret" (include "lembos.certificateSecretName" (dict "root" . "name" "identitySigning")) "key" "tls.key") | nindent 12 }}
+            {{- include "lembos.keyProtectionEnv" (dict "root" . "name" "identityDataProtection") | nindent 12 }}
+            {{- include "lembos.secretEnv" (dict "name" "Identity__DefaultAdmin__Password" "secret" $secrets "key" "identity-admin-password") | nindent 12 }}
+
+            {{- if .Values.platform.integrations.gitHub.enabled }}
+            {{- $gitHub := include "lembos.gitHubSecretName" . }}
+            {{- include "lembos.secretEnv" (dict "name" "Identity__ExternalProviders__GitHub__ClientId" "secret" $gitHub "key" "github-client-id") | nindent 12 }}
+            {{- include "lembos.secretEnv" (dict "name" "Identity__ExternalProviders__GitHub__ClientSecret" "secret" $gitHub "key" "github-client-secret") | nindent 12 }}
+            {{- end }}
+            {{- include "lembos.trustEnv" . | nindent 12 }}
+            {{- with $values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- include "lembos.probes" . | nindent 10 }}
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "lembos.settingsMount" . | nindent 12 }}
+            - name: tmp
+              mountPath: /tmp
+            {{- include "lembos.trustMount" . | nindent 12 }}
+      volumes:
+        {{- include "lembos.settingsVolume" $ctx | nindent 8 }}
+        - name: tmp
+          emptyDir: {}
+        {{- include "lembos.trustVolume" . | nindent 8 }}

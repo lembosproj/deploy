@@ -1,0 +1,73 @@
+{{- $ctx := dict "root" . "component" "portal" -}}
+{{- $values := .Values.portal -}}
+{{- $secrets := include "lembos.secretName" . -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not (include "lembos.autoscaling" $ctx) }}
+  replicas: {{ include "lembos.replicas" $ctx }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+        {{- with .Values.global.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/portal/configmap.yaml") . | sha256sum }}
+        {{- with (merge (deepCopy $values.podAnnotations) .Values.global.podAnnotations) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "lembos.componentName" $ctx }}
+      automountServiceAccountToken: false
+      {{- include "lembos.dotnetProcess" . | nindent 6 }}
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- include "lembos.scheduling" (dict "root" . "values" $values "component" "portal") | nindent 6 }}
+      containers:
+        - name: portal
+          image: {{ include "lembos.serviceImage" (dict "root" . "image" $values.image) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            # The public listener.
+            - name: ASPNETCORE_HTTP_PORTS
+              value: "8080"
+            {{- include "lembos.hostEnv" $ctx | nindent 12 }}
+            # Sessions, tokens and the Data Protection key ring that encrypts them.
+            {{- include "lembos.redisEnv" . | nindent 12 }}
+            {{- include "lembos.secretEnv" (dict "name" "Identity__ClientSecret" "secret" $secrets "key" "client-secret-portal") | nindent 12 }}
+            {{- include "lembos.keyProtectionEnv" (dict "root" . "name" "portalDataProtection") | nindent 12 }}
+            {{- include "lembos.trustEnv" . | nindent 12 }}
+            {{- with $values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- include "lembos.probes" . | nindent 10 }}
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "lembos.settingsMount" . | nindent 12 }}
+            - name: tmp
+              mountPath: /tmp
+            {{- include "lembos.trustMount" . | nindent 12 }}
+      volumes:
+        {{- include "lembos.settingsVolume" $ctx | nindent 8 }}
+        - name: tmp
+          emptyDir: {}
+        {{- include "lembos.trustVolume" . | nindent 8 }}

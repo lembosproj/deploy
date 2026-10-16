@@ -1,0 +1,152 @@
+{{- /*
+The setup job and what it runs as. All hooks, so they exist before anything that reads a Secret and are
+gone once it has succeeded: pre-install and pre-upgrade under Helm, PreSync under Argo CD.
+
+The Secrets it creates are not part of the release. Helm and Argo CD neither track nor prune them, which is
+what keeps an uninstall, or a sync that renders the chart again, from taking every key with it.
+*/ -}}
+{{- $ctx := dict "root" . "component" "setup" -}}
+{{- $name := include "lembos.componentName" $ctx -}}
+{{- $names := include "lembos.setup.secretNames" . | fromJsonArray -}}
+{{- $hook := dict
+  "helm.sh/hook" "pre-install,pre-upgrade"
+  "helm.sh/hook-delete-policy" "before-hook-creation,hook-succeeded" -}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+---
+# Secrets in this namespace and nothing else. Reading and patching are limited to the Secrets the spec
+# names; creating cannot be limited by name in Kubernetes RBAC, so it is the one verb that is not.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+  {{- with $names }}
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames:
+      {{- toYaml . | nindent 6 }}
+    verbs: [get, patch]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $name }}
+    namespace: {{ .Release.Namespace }}
+---
+# The spec, as a Secret because it carries whatever values were given inline. Deleted with the job once it
+# has succeeded.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-spec
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+type: Opaque
+data:
+  spec.json: {{ include "lembos.setup.spec" . | b64enc }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "0"
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+    spec:
+      serviceAccountName: {{ $name }}
+      # The one pod in the release that talks to the API server: it is what writes the Secrets.
+      automountServiceAccountToken: true
+      {{- include "lembos.dotnetProcess" . | nindent 6 }}
+      restartPolicy: Never
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- include "lembos.scheduling" (dict "root" . "values" dict) | nindent 6 }}
+      containers:
+        - name: setup
+          image: {{ include "lembos.serviceImage" (dict "root" . "image" .Values.setup.image) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          args: [/etc/lembos-setup/spec.json]
+          resources:
+            {{- toYaml .Values.setup.resources | nindent 12 }}
+          volumeMounts:
+            - name: spec
+              mountPath: /etc/lembos-setup
+              readOnly: true
+      volumes:
+        - name: spec
+          secret:
+            secretName: {{ $name }}-spec
+{{- if .Values.networkPolicy.create }}
+---
+# DNS and the API server. The API server's address is not a pod, so it is allowed by port alone.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+  annotations:
+    {{- toYaml $hook | nindent 4 }}
+    helm.sh/hook-weight: "-10"
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    {{- include "lembos.dnsEgress" . | nindent 4 }}
+    - ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 6443}
+{{- end }}

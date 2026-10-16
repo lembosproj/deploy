@@ -1,0 +1,94 @@
+{{- /*
+Checks that render nothing. Each turns a release that would install and then crash-loop — a dependency
+switched on twice or not at all, an upstream chart pointed at a PostgreSQL that is not there, an Identity
+with nowhere to send mail — into a failed install that names the value to set.
+*/ -}}
+
+{{- $postgres := include "lembos.postgresql.mode" . }}
+{{- $redis := include "lembos.redis.mode" . }}
+{{- $temporal := include "lembos.temporal.mode" . }}
+
+{{- /*
+Two of everything in front of one PostgreSQL pod is still one pod from an outage, and it would read as
+highly available to whoever looks at the replica counts. A high-available install takes high-available or
+external dependencies only.
+*/}}
+{{- if include "lembos.highAvailable" . }}
+{{- range $dependency, $mode := dict "postgresql" $postgres "redis" $redis "temporal" $temporal }}
+{{- if eq $mode "simple" }}
+{{- fail (printf "installMode is high-available, but %s.mode is simple — a single pod the rest of the release depends on. Set %s.mode to high-available or external, or leave it empty." $dependency $dependency) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /*
+A mode cannot switch an upstream chart on or off: Helm decides that from a boolean in the dependency's own
+values. So the boolean and the mode are two statements of one decision, and they have to agree.
+*/}}
+{{- $redisHa := index .Values "redis-ha" }}
+{{- if ne (eq $redis "high-available") (and $redisHa.enabled true) }}
+{{- fail (printf "Redis is %s (redis.mode, or installMode when that is empty), so set redis-ha.enabled: %t. Helm renders a dependency from a boolean in its own values, which the mode cannot set." $redis (eq $redis "high-available")) }}
+{{- end }}
+
+{{- $temporalHa := index .Values "temporal-ha" }}
+{{- if ne (eq $temporal "high-available") (and $temporalHa.enabled true) }}
+{{- fail (printf "Temporal is %s (temporal.mode, or installMode when that is empty), so set temporal-ha.enabled: %t. Helm renders a dependency from a boolean in its own values, which the mode cannot set." $temporal (eq $temporal "high-available")) }}
+{{- end }}
+
+{{- if and $redisHa.enabled (not (and $redisHa.auth $redisHa.existingSecret)) }}
+{{- fail (printf "redis-ha needs auth: true and existingSecret set — the services authenticate to it. Use existingSecret: %s and authKey: redis-password to have the setup job generate the password." (include "lembos.secretName" .)) }}
+{{- end }}
+
+{{- /*
+The official Temporal chart cannot read this chart's values, so its datastores name the PostgreSQL by hand.
+Checked against what this release actually connects to, rather than discovered by a schema job that
+retries forever.
+*/}}
+{{- if eq $temporal "high-available" }}
+{{- $address := printf "%s:%s" (include "lembos.postgresql.host" .) (include "lembos.postgresql.port" .) }}
+{{- $password := include "lembos.postgresql.passwordRef" . | fromYaml }}
+{{- $user := include "lembos.postgresql.username" . }}
+{{- range $store := list "default" "visibility" }}
+{{- $sql := (index $temporalHa.server.config.persistence.datastores $store).sql }}
+{{- $path := printf "temporal-ha.server.config.persistence.datastores.%s.sql" $store }}
+{{- if ne $sql.connectAddr $address }}
+{{- fail (printf "%s.connectAddr is %q, but this release's PostgreSQL is at %q. Set it to %q." $path $sql.connectAddr $address $address) }}
+{{- end }}
+{{- if ne $sql.user $user }}
+{{- fail (printf "%s.user is %q, but this release connects to PostgreSQL as %q. Set it to %q." $path $sql.user $user $user) }}
+{{- end }}
+{{- if or (ne $sql.existingSecret $password.name) (ne $sql.secretKey $password.key) }}
+{{- fail (printf "%s takes its password from %s/%s, but this release's PostgreSQL password is in %s/%s. Set existingSecret: %s and secretKey: %s." $path $sql.existingSecret $sql.secretKey $password.name $password.key $password.name $password.key) }}
+{{- end }}
+{{- if and (eq $postgres "high-available") $sql.createDatabase }}
+{{- fail (printf "%s.createDatabase must be false when PostgreSQL is high-available: this chart creates the databases as CloudNativePG Database resources, and the owner role cannot." $path) }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{- /*
+Resources whose kinds an operator or add-on installs. Without them the install fails at the API server
+with "no matches for kind", which names the resource but not what to install; asked here, the failure says.
+Helm fills .Capabilities from the cluster on install and upgrade; `helm template` and GitOps renderers need
+--api-versions, as CI passes.
+*/}}
+{{- if eq $postgres "high-available" }}
+{{- $missing := list }}
+{{- range $kind := list "Cluster" "Database" }}
+{{- if not ($.Capabilities.APIVersions.Has (printf "postgresql.cnpg.io/v1/%s" $kind)) }}
+{{- $missing = append $missing $kind }}
+{{- end }}
+{{- end }}
+{{- with $missing }}
+{{- fail (printf "PostgreSQL is high-available, which this chart runs as a CloudNativePG cluster, and this cluster has no postgresql.cnpg.io/v1 %s. Install the CloudNativePG operator, 1.25 or later (see the chart README's Prerequisites), or set postgresql.mode to external. Rendering without a cluster? Pass --api-versions postgresql.cnpg.io/v1/Cluster --api-versions postgresql.cnpg.io/v1/Database." (join " or " .)) }}
+{{- end }}
+{{- end }}
+
+{{- if and .Values.gateway.enabled (not (.Capabilities.APIVersions.Has "gateway.networking.k8s.io/v1/HTTPRoute")) }}
+{{- fail "gateway.enabled renders Gateway API HTTPRoutes, and this cluster has no gateway.networking.k8s.io/v1 HTTPRoute. Install the Gateway API CRDs (and a Gateway implementation), or publish through ingress.enabled instead. Rendering without a cluster? Pass --api-versions gateway.networking.k8s.io/v1/HTTPRoute." }}
+{{- end }}
+
+{{- /* Identity refuses to start outside Development with nowhere to send mail; say so before it does. */}}
+{{- if and (ne .Values.global.environment "Development") (not (include "lembos.smtp.endpoint" .)) }}
+{{- fail "Identity needs somewhere to send invitations and password resets outside Development: set identity.smtp.endpoint (smtp://host:port) to a relay, or mailpit.enabled: true on a laptop." }}
+{{- end }}

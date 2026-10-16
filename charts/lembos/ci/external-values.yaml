@@ -1,0 +1,58 @@
+# Rendered by CI: every dependency external, every secret managed outside the chart, Gateway API instead of
+# Ingress, a high-available install and GitHub on.
+installMode: high-available
+global:
+  domain: idp.example.org
+secrets:
+  existingSecret: lembos-platform
+  gitHub:
+    existingSecret: lembos-github
+certificates:
+  identitySigning: {existingSecret: lembos-identity-signing}
+  identityDataProtection: {existingSecret: lembos-identity-dp}
+  orchestratorDataProtection: {existingSecret: lembos-orchestrator-dp}
+  portalDataProtection: {existingSecret: lembos-portal-dp}
+platform:
+  userManagement:
+    mode: DirectorySourced
+  directory:
+    roleBindings:
+      platform-admins: Administrator
+  integrations:
+    gitHub:
+      enabled: true
+ingress:
+  enabled: false
+gateway:
+  enabled: true
+  parentRefs:
+    - name: public
+      namespace: gateway-system
+identity:
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4}
+  podDisruptionBudget: {enabled: true}
+  smtp:
+    endpoint: smtp://relay.example.org:25
+orchestrator:
+  autoscaling: {enabled: true, minReplicas: 2, maxReplicas: 4, targetMemoryUtilizationPercentage: 80}
+worker:
+  autoscaling: {enabled: true}
+postgresql:
+  mode: external
+  external:
+    host: pg.example.org
+    username: lembos
+    existingSecret: lembos-postgres
+    existingSecretPasswordKey: password
+    sslMode: VerifyFull
+redis:
+  mode: external
+  external:
+    host: redis.example.org
+    port: 6380
+    existingSecret: lembos-redis
+    tls: true
+temporal:
+  mode: external
+  external:
+    host: temporal-frontend.temporal.svc

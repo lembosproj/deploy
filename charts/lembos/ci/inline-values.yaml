@@ -1,0 +1,25 @@
+# Rendered by CI: secrets and key pairs given inline, as a throwaway installation would.
+secrets:
+  clientSecrets:
+    portal: cG9ydGFs
+  identityAdminPassword: Correct-horse-battery-9
+certificates:
+  portalDataProtection:
+    certificate: |
+      -----BEGIN CERTIFICATE-----
+      MIIBfake
+      -----END CERTIFICATE-----
+    privateKey: |
+      -----BEGIN RSA PRIVATE KEY-----
+      MIIBfake
+      -----END RSA PRIVATE KEY-----
+networkPolicy:
+  create: false
+# Mail to a relay given inline, and a simple Temporal whose UI is published.
+identity:
+  smtp:
+    endpoint: smtp://relay.example.org:25
+temporal:
+  ui:
+    ingress:
+      enabled: true

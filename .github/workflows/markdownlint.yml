@@ -1,0 +1,40 @@
+name: Markdownlint
+
+permissions:
+  contents: read
+
+# run even on changes without markdown changes, so that we can
+# make it in GitHub a required check for PR's
+on:
+  pull_request:
+    branches-ignore:
+      - "dependabot/**"
+
+jobs:
+  lint:
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      # Pinned: an unpinned install picks up every new rule upstream ships, which turns a docs-only PR red
+      # for files it never touched. Bump deliberately, and fix what the new version reports in the same PR.
+      - name: Install markdownlint-cli
+        run: npm install --save-dev markdownlint-cli@0.49.1
+
+      - name: Register markdownlint problem matcher
+        run: echo "::add-matcher::.github/workflows/markdownlint-problem-matcher.json"
+
+      - name: Run markdownlint
+        run: npx markdownlint --ignore 'node_modules/' '**/*.md'
+
+      - name: Remove markdownlint matcher
+        if: always()
+        run: echo "::remove-matcher owner=markdownlint::"

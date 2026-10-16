@@ -1,0 +1,23 @@
+{{- /*
+The Orchestrator's share of the platform contract, as an appsettings file. Secrets arrive as environment
+variables from Secrets, which override anything here.
+*/ -}}
+{{- $ctx := dict "root" . "component" "orchestrator" -}}
+{{- $settings := include "lembos.commonSettings" . | fromJson -}}
+
+{{- /*
+The one bit of the role bindings this service needs: whether to refuse role changes the next directory sync
+would revert.
+*/ -}}
+{{- $_ := set $settings.UserManagement "DirectoryOwnsRoles" (gt (len .Values.platform.directory.roleBindings) 0) -}}
+
+{{- /* The public origin, not the Service: it is the issuer this API validates tokens against. */ -}}
+{{- $_ := set $settings "Identity" (dict
+  "Url" (include "lembos.origin" (dict "root" . "component" "identity"))
+  "DefaultAdmin" (dict "Email" .Values.platform.userManagement.bootstrapAdmin.email)) -}}
+{{- $_ := set $settings "Cors" (dict "AllowedOrigins" (include "lembos.origin" (dict "root" . "component" "portal"))) -}}
+{{- $_ := set $settings "SampleData" (dict "Enabled" .Values.orchestrator.sampleData) -}}
+{{- $_ := set $settings "WorkflowTriggers" (include "lembos.workflowTriggerSettings" . | fromJson) -}}
+{{- $_ := set $settings "ConnectionStrings" (dict "temporal" (include "lembos.temporal.address" .)) -}}
+
+{{- include "lembos.settingsConfigMap" (dict "ctx" $ctx "settings" $settings) }}

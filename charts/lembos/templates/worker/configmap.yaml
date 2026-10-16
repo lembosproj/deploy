@@ -1,0 +1,32 @@
+{{- /*
+The Worker's share of the platform contract, as an appsettings file. Secrets arrive as environment
+variables from Secrets, which override anything here.
+*/ -}}
+{{- $ctx := dict "root" . "component" "worker" -}}
+{{- $directory := .Values.platform.directory -}}
+{{- $settings := include "lembos.commonSettings" . | fromJson -}}
+
+{{- /* Tokens come from the public origin, which is the issuer the APIs validate them against. */ -}}
+{{- $_ := set $settings "Identity" (dict "Url" (include "lembos.origin" (dict "root" . "component" "identity"))) -}}
+
+{{- /* The account-management listener is on its own internal Service; admin routes answer 404 anywhere else. */ -}}
+{{- $identity := include "lembos.componentName" (dict "root" . "component" "identity") -}}
+{{- $_ := set $settings "PlatformServices" (dict
+  "Orchestrator" (printf "http://%s:8080" (include "lembos.componentName" (dict "root" . "component" "orchestrator")))
+  "IdentityAdmin" (printf "http://%s-admin:%v" $identity .Values.identity.adminPort)) -}}
+
+{{- /* Directory policy, to the Worker alone: it is the only thing that reconciles. */ -}}
+{{- $_ := set $settings "Directory" (dict
+  "Schedule" (dict "Provider" $directory.provider "Interval" $directory.syncInterval)
+  "Deprovisioning" (dict
+    "MinimumRosterForRatio" $directory.deprovisioning.minimumRosterForRatio
+    "MaxRatio" $directory.deprovisioning.maxRatio
+    "MaxAbsolute" $directory.deprovisioning.maxAbsolute)
+  "RoleBindings" $directory.roleBindings
+  "GitHub" (dict "Enabled" .Values.platform.integrations.gitHub.enabled)) -}}
+
+{{- /* Where runs work on disk is the image's business (/var/lib/lembos); how many at once is the deployment's. */ -}}
+{{- $_ := set $settings "Runs" (dict "Workspace" (dict "MaxConcurrentRuns" .Values.worker.maxConcurrentRuns)) -}}
+{{- $_ := set $settings "ConnectionStrings" (dict "temporal" (include "lembos.temporal.address" .)) -}}
+
+{{- include "lembos.settingsConfigMap" (dict "ctx" $ctx "settings" $settings) }}

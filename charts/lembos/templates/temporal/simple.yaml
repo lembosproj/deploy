@@ -1,0 +1,194 @@
+{{- /*
+Temporal as `aspire start` runs it: the auto-setup image, every Temporal service in one process. On start it
+creates its two databases, applies the schema and registers the `default` namespace — the schema job, the
+namespace job and four Deployments of the high-available mode, folded into one pod.
+*/ -}}
+{{- if eq (include "lembos.temporal.mode" .) "simple" }}
+{{- $ctx := dict "root" . "component" "temporal" -}}
+{{- $values := .Values.temporal.simple -}}
+{{- $postgres := include "lembos.postgresql.mode" . -}}
+{{- $sslMode := .Values.postgresql.external.sslMode -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}-dynamic-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+data:
+  dynamic-config.yaml: |
+    {{- toYaml $values.dynamicConfig | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "lembos.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: grpc
+      port: 7233
+      targetPort: grpc
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  # One server. Recreate, so an upgrade never has two of them applying the schema at once.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+      annotations:
+        checksum/dynamic-config: {{ toYaml $values.dynamicConfig | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      # 1000 is the image's own temporal user.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      {{- include "lembos.scheduling" (dict "root" . "values" $values) | nindent 6 }}
+      containers:
+        - name: temporal
+          image: {{ include "lembos.image" $values.image }}
+          imagePullPolicy: {{ $values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            # Writable: the image renders its server configuration into /etc/temporal/config on every start,
+            # beside the template it renders from, so no volume can stand in for that directory.
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: grpc
+              containerPort: 7233
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            # Every interface, so the probes below reach it on loopback; the ring is told the pod's address.
+            - name: BIND_ON_IP
+              value: 0.0.0.0
+            - name: TEMPORAL_BROADCAST_ADDRESS
+              value: $(POD_IP)
+            # Where the image's own setup steps, and the probes, dial.
+            - name: TEMPORAL_ADDRESS
+              value: 127.0.0.1:7233
+            - name: DB
+              value: postgres12
+            - name: POSTGRES_SEEDS
+              value: {{ include "lembos.postgresql.host" . | quote }}
+            - name: DB_PORT
+              value: {{ include "lembos.postgresql.port" . | quote }}
+            - name: POSTGRES_USER
+              value: {{ include "lembos.postgresql.username" . | quote }}
+            - name: POSTGRES_PWD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "lembos.postgresql.passwordRef" . | nindent 18 }}
+            # Separate databases for history and visibility, which is how Temporal expects PostgreSQL to be
+            # laid out.
+            - name: DBNAME
+              value: temporal
+            - name: VISIBILITY_DBNAME
+              value: temporal_visibility
+            {{- if eq $postgres "high-available" }}
+            # CloudNativePG creates them as Database resources; the owner role could not.
+            - name: SKIP_DB_CREATE
+              value: "true"
+            {{- end }}
+            {{- if and (eq $postgres "external") (has $sslMode (list "Require" "VerifyCA" "VerifyFull")) }}
+            - name: SQL_TLS_ENABLED
+              value: "true"
+            - name: SQL_HOST_VERIFICATION
+              value: {{ eq $sslMode "VerifyFull" | quote }}
+            {{- end }}
+            # No Elasticsearch: visibility on PostgreSQL finds a workflow by id or type, which is all the
+            # platform asks of it.
+            - name: ENABLE_ES
+              value: "false"
+            - name: DEFAULT_NAMESPACE_RETENTION
+              value: {{ $values.retention | quote }}
+            - name: DYNAMIC_CONFIG_FILE_PATH
+              value: /etc/temporal/config/dynamicconfig/dynamic-config.yaml
+          # Ready once `default` can be described, not once the port opens: the port is open well before the
+          # namespace exists, and a Worker that starts in that window exits — the same reason the app host's
+          # health check asks this question.
+          startupProbe:
+            exec:
+              command: ["temporal", "operator", "namespace", "describe", "--namespace", "default"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: ["temporal", "operator", "namespace", "describe", "--namespace", "default"]
+            periodSeconds: 15
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket: {port: grpc}
+            periodSeconds: 20
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            - name: dynamic-config
+              mountPath: /etc/temporal/config/dynamicconfig
+              readOnly: true
+      volumes:
+        - name: dynamic-config
+          configMap:
+            name: {{ include "lembos.componentName" $ctx }}-dynamic-config
+{{- if .Values.networkPolicy.create }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Clients of the frontend: the two services that start workflows, the Worker that runs them, the UI.
+    - from:
+        {{- include "lembos.peer" (dict "root" . "component" "identity") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "orchestrator") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "worker") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "temporal-ui") | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 7233}
+    # Itself, on its broadcast address: the services inside the one process still talk over the ring.
+    - from:
+        {{- include "lembos.peer" $ctx | nindent 8 }}
+  egress:
+    {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.postgresqlEgress" . | nindent 4 }}
+    - to:
+        {{- include "lembos.peer" $ctx | nindent 8 }}
+{{- end }}
+{{- end }}

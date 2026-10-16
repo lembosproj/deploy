@@ -1,0 +1,115 @@
+{{- /*
+Temporal's web UI, the same Deployment whichever mode Temporal runs in: it is stateless and only needs a
+frontend to dial, so one template serves the auto-setup server, the official chart's frontend and an
+external one alike.
+*/ -}}
+{{- if .Values.temporal.ui.enabled }}
+{{- $ctx := dict "root" . "component" "temporal-ui" -}}
+{{- $values := .Values.temporal.ui -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "lembos.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      {{- include "lembos.scheduling" (dict "root" . "values" dict) | nindent 6 }}
+      containers:
+        - name: ui
+          image: {{ include "lembos.image" $values.image }}
+          imagePullPolicy: {{ $values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: {{ include "lembos.temporal.address" . | quote }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: http}
+            periodSeconds: 20
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- if .Values.networkPolicy.create }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  {{- $from := .Values.networkPolicy.temporalWeb.from }}
+  {{- if or $from $values.ingress.enabled }}
+  ingress:
+    # Whoever the deployment lets reach a UI with no authentication of its own: the ingress controller when
+    # it is published, a VPN or bastion namespace. Port-forward needs no rule.
+    - from:
+        {{- with $from }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- if $values.ingress.enabled }}
+        {{- include "lembos.ingressControllerPeer" . | nindent 8 }}
+        {{- end }}
+      ports:
+        - {protocol: TCP, port: 8080}
+  {{- else }}
+  ingress: []
+  {{- end }}
+  egress:
+    {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.temporalEgress" . | nindent 4 }}
+{{- end }}
+{{- end }}

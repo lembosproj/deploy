@@ -1,0 +1,41 @@
+{{- /*
+The official chart's pods ship no NetworkPolicy. This is theirs: the same deny-by-default shape as every
+other pod in the release, selected by the labels that chart sets.
+*/ -}}
+{{- if and (eq (include "lembos.temporal.mode" .) "high-available") .Values.networkPolicy.create }}
+{{- $temporal := include "lembos.temporalHaPodLabels" . }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.temporalHa.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" (dict "root" . "component" "temporal") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- $temporal | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # Clients of the frontend: the two services that start workflows, the Worker that runs them, the UI.
+    - from:
+        {{- include "lembos.peer" (dict "root" . "component" "identity") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "orchestrator") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "worker") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "temporal-ui") | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 7233}
+    # Its own services — frontend, history, matching, worker and the schema job — on every port they use
+    # between themselves, which the membership ring assigns per service.
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- $temporal | nindent 14 }}
+  egress:
+    {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.postgresqlEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- $temporal | nindent 14 }}
+{{- end }}

@@ -1,0 +1,121 @@
+name: Chart
+
+# Pull requests and main validate the chart; a version tag (v1.2.3, v1.2.3-rc.1) publishes it and a GitHub
+# Release. The tag is the chart's version; the platform release it installs is Chart.yaml's appVersion, whose
+# images lembosproj/platform publishes — so cutting a chart never rebuilds an image:
+#
+#   git tag v0.2.0 && git push origin v0.2.0
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "charts/**"
+      - ".github/workflows/chart.yml"
+  push:
+    branches:
+      - main
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Helm chart
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      # build, not update: exactly what Chart.lock records, digests checked, and a failure when the lock and
+      # Chart.yaml disagree — so a dependency moves only in a reviewed change to both.
+      - name: Fetch dependencies
+        run: |
+          helm repo add dandydeveloper https://dandydeveloper.github.io/charts
+          helm repo add temporal https://go.temporal.io/helm-charts
+          helm dependency build charts/lembos
+      # Every values file the chart ships or tests with, rendered and checked against the Kubernetes schemas
+      # strictly — a key the API server would drop silently is a failure here. The defaults are
+      # ci/default-values.yaml, because the chart refuses to render without somewhere to send mail.
+      # values-ha.yaml asks for a relay on the command line, so it is given one here. The API versions stand
+      # in for the operators and CRDs a cluster would have: the chart checks for them before rendering
+      # resources of their kinds, and a render has no cluster to ask.
+      - name: Lint and validate
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
+          helm lint charts/lembos -f charts/lembos/ci/default-values.yaml
+          for values in charts/lembos/values-k3s.yaml charts/lembos/values-ha.yaml charts/lembos/ci/*.yaml; do
+            echo "::group::$values"
+            relay=()
+            [[ "$values" == *values-ha.yaml ]] && relay=(--set-string identity.smtp.endpoint=smtp://relay.example.org:25)
+            helm template lembos charts/lembos --namespace lembos -f "$values" "${relay[@]}" \
+              --api-versions postgresql.cnpg.io/v1/Cluster --api-versions postgresql.cnpg.io/v1/Database \
+              --api-versions gateway.networking.k8s.io/v1/HTTPRoute \
+              | "$(go env GOPATH)/bin/kubeconform" -strict -summary -kubernetes-version 1.33.0 \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+            echo "::endgroup::"
+          done
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [validate]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      - id: versions
+        run: |
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "app=$(yq '.appVersion' charts/lembos/Chart.yaml)" >> "$GITHUB_OUTPUT"
+      # The chart names these by default; publishing it before they exist would publish a chart that cannot
+      # pull what it installs. Anonymous on purpose: a cluster pulls them without credentials too.
+      - name: Platform images exist
+        env:
+          APP_VERSION: ${{ steps.versions.outputs.app }}
+        run: |
+          for image in identity orchestrator portal worker setup; do
+            docker manifest inspect "ghcr.io/${{ github.repository_owner }}/$image:$APP_VERSION" > /dev/null \
+              || { echo "::error::ghcr.io/${{ github.repository_owner }}/$image:$APP_VERSION is not published, or not public."; exit 1; }
+          done
+      # The tag decides the chart's version, so Chart.yaml's version never has to be bumped to cut one.
+      - name: Package the chart
+        run: |
+          helm repo add dandydeveloper https://dandydeveloper.github.io/charts
+          helm repo add temporal https://go.temporal.io/helm-charts
+          helm dependency build charts/lembos
+          helm package charts/lembos --version "${{ steps.versions.outputs.version }}" --destination dist
+      # OCI in GHCR, beside the images: helm install oci://ghcr.io/<owner>/charts/lembos --version <version>
+      - name: Push the chart to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/lembos-${{ steps.versions.outputs.version }}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+      # A suffixed tag (v1.2.0-rc.1) is a pre-release, so "latest" only ever points at a finished milestone.
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.versions.outputs.version }}
+          APP_VERSION: ${{ steps.versions.outputs.app }}
+        run: |
+          prerelease=()
+          [[ "$VERSION" == *-* ]] && prerelease=(--prerelease)
+          owner="${{ github.repository_owner }}"
+          cat > notes.md <<NOTES
+          ## Install
+
+          \`\`\`shell
+          helm upgrade --install lembos oci://ghcr.io/${owner}/charts/lembos --version ${VERSION} \\
+            --namespace lembos --create-namespace --set global.domain=<your domain>
+          \`\`\`
+
+          Installs Lembos ${APP_VERSION}: \`ghcr.io/${owner}/{identity,orchestrator,portal,worker,setup}:${APP_VERSION}\`
+          NOTES
+          gh release create "$GITHUB_REF_NAME" "dist/lembos-${VERSION}.tgz" \
+            --title "Lembos chart ${VERSION}" --notes-file notes.md --generate-notes --verify-tag "${prerelease[@]}"

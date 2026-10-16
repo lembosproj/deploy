@@ -1,0 +1,15 @@
+# Packaged charts, and the dependencies `helm dependency build` fetches from what Chart.lock pins. The lock
+# itself is committed: it is the pin.
+dist/
+*.tgz
+
+# Terraform working state, for when modules land here.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+.DS_Store
+.idea/
+.vscode/
+node_modules/

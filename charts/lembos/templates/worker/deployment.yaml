@@ -1,0 +1,103 @@
+{{- $ctx := dict "root" . "component" "worker" -}}
+{{- $values := .Values.worker -}}
+{{- $secrets := include "lembos.secretName" . -}}
+# A Deployment, so the HPA scales it like any other, with a workspace volume per pod rather than one shared:
+# the toolchain directory and the provider cache are single-writer — two processes unzipping terraform into
+# one path leave a half-written binary — and a pod with its own volume is the topology those paths were
+# written for. The volume is claimed with the pod and released with it, so scaling down leaves nothing behind.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  {{- if not (include "lembos.autoscaling" $ctx) }}
+  replicas: {{ include "lembos.replicas" $ctx }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+        {{- with .Values.global.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/worker/configmap.yaml") . | sha256sum }}
+        {{- with (merge (deepCopy $values.podAnnotations) .Values.global.podAnnotations) }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "lembos.componentName" $ctx }}
+      # Target clusters are reached with the kubeconfig a run is issued, never with this pod's identity.
+      automountServiceAccountToken: false
+      {{- include "lembos.dotnetProcess" . | nindent 6 }}
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- include "lembos.scheduling" (dict "root" . "values" $values "component" "worker") | nindent 6 }}
+      # A cancelled run interrupts terraform and waits for it to release its state lock; give that time.
+      terminationGracePeriodSeconds: 330
+      containers:
+        - name: worker
+          image: {{ include "lembos.serviceImage" (dict "root" . "image" $values.image) }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.global.containerSecurityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            {{- include "lembos.hostEnv" $ctx | nindent 12 }}
+            # Two seats, two secrets: sharing one would make "which of them acted" unanswerable.
+            {{- include "lembos.secretEnv" (dict "name" "Identity__Secrets__directory-synchronizer" "secret" $secrets "key" "client-secret-directory-synchronizer") | nindent 12 }}
+            {{- include "lembos.secretEnv" (dict "name" "Identity__Secrets__execution-agent" "secret" $secrets "key" "client-secret-execution-agent") | nindent 12 }}
+            {{- if .Values.platform.integrations.gitHub.enabled }}
+            {{- $gitHub := include "lembos.gitHubSecretName" . }}
+            {{- include "lembos.secretEnv" (dict "name" "Directory__GitHub__AppId" "secret" $gitHub "key" "github-app-id") | nindent 12 }}
+            {{- include "lembos.secretEnv" (dict "name" "Directory__GitHub__Organization" "secret" $gitHub "key" "github-app-org") | nindent 12 }}
+            {{- include "lembos.secretEnv" (dict "name" "Directory__GitHub__PrivateKeyBase64" "secret" $gitHub "key" "github-private-key-base64") | nindent 12 }}
+            {{- end }}
+            {{- include "lembos.trustEnv" . | nindent 12 }}
+            {{- with $values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- include "lembos.probes" . | nindent 10 }}
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            {{- include "lembos.settingsMount" . | nindent 12 }}
+            - name: tmp
+              mountPath: /tmp
+            # Runs, toolchain, provider cache and HOME — the image points all four under this path.
+            - name: workspace
+              mountPath: /var/lib/lembos
+            {{- include "lembos.trustMount" . | nindent 12 }}
+      volumes:
+        {{- include "lembos.settingsVolume" $ctx | nindent 8 }}
+        - name: tmp
+          emptyDir: {}
+        - name: workspace
+          {{- if $values.persistence.enabled }}
+          ephemeral:
+            volumeClaimTemplate:
+              metadata:
+                labels:
+                  {{- include "lembos.selectorLabels" $ctx | nindent 18 }}
+              spec:
+                accessModes: [ReadWriteOnce]
+                {{- with $values.persistence.storageClass }}
+                storageClassName: {{ . }}
+                {{- end }}
+                resources:
+                  requests:
+                    storage: {{ $values.persistence.size }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- include "lembos.trustVolume" . | nindent 8 }}

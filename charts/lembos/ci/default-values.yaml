@@ -1,0 +1,4 @@
+# Rendered by CI: the chart's defaults, plus the one value that has none — where Identity sends mail.
+identity:
+  smtp:
+    endpoint: smtp://relay.example.org:25

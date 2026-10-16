@@ -1,0 +1,18 @@
+{{- /*
+The Portal's share of the platform contract, as an appsettings file. Secrets arrive as environment
+variables from Secrets, which override anything here.
+*/ -}}
+{{- $ctx := dict "root" . "component" "portal" -}}
+{{- $settings := include "lembos.commonSettings" . | fromJson -}}
+
+{{- /* The public origin: the browser is sent there to sign in, and the tokens it returns are issued by it. */ -}}
+{{- $_ := set $settings "Identity" (dict "Url" (include "lembos.origin" (dict "root" . "component" "identity"))) -}}
+
+{{- /*
+The Orchestrator in-cluster. The Portal calls it server-side with the signed-in person's token, so the hop
+needs no public name and no TLS of its own.
+*/ -}}
+{{- $_ := set $settings "PlatformServices" (dict
+  "Orchestrator" (printf "http://%s:8080" (include "lembos.componentName" (dict "root" . "component" "orchestrator")))) -}}
+
+{{- include "lembos.settingsConfigMap" (dict "ctx" $ctx "settings" $settings) }}

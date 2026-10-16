@@ -1,0 +1,19 @@
+{{- range $component := list "identity" "orchestrator" "portal" "worker" }}
+{{- $values := index $.Values $component }}
+{{- $ctx := dict "root" $ "component" $component }}
+{{- if include "lembos.podDisruptionBudget" $ctx }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  minAvailable: {{ $values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,74 @@
+{{- /*
+PostgreSQL with failover: a CloudNativePG Cluster, which the operator turns into instances, replication and
+the -rw Service that always points at the primary. Rendered here rather than through the operator's
+`cluster` chart, so postgresql.mode is the only switch and the names follow the release instead of being
+written out in values by hand.
+*/ -}}
+{{- if eq (include "lembos.postgresql.mode" .) "high-available" }}
+{{- $ctx := dict "root" . "component" "postgresql" -}}
+{{- $values := .Values.postgresql.highAvailable -}}
+{{- $cluster := include "lembos.postgresql.clusterName" . -}}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ $cluster }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  instances: {{ $values.instances }}
+  {{- with $values.imageName }}
+  imageName: {{ . }}
+  {{- end }}
+  # The services connect as the owner; there is no reason for a superuser password to exist.
+  enableSuperuserAccess: false
+  {{- with $values.parameters }}
+  postgresql:
+    parameters:
+      {{- toYaml . | nindent 6 }}
+  {{- end }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.postgresql.databases.identity }}
+      owner: {{ $values.owner }}
+      # Kept by the setup job as a copy of the release's postgres-password, so the role and every connection
+      # string are one credential.
+      secret:
+        name: {{ include "lembos.postgresql.appSecret" . }}
+  storage:
+    size: {{ $values.storage.size }}
+    {{- with $values.storage.storageClass }}
+    storageClass: {{ . }}
+    {{- end }}
+  {{- with $values.resources }}
+  resources:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $values.affinity }}
+  affinity:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- /*
+The rest of the databases: the Orchestrator's, and Temporal's two when Temporal runs in this release. The
+owner role cannot create databases, so nothing else could.
+*/}}
+{{- $databases := concat (list .Values.postgresql.databases.orchestrator) (include "lembos.temporal.databases" . | fromJsonArray) }}
+{{- range $databases }}
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Database
+metadata:
+  name: {{ printf "%s-%s" $cluster (. | replace "_" "-") | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  name: {{ . }}
+  owner: {{ $values.owner }}
+  cluster:
+    name: {{ $cluster }}
+  # Kept when the release goes, like the Cluster's volumes: dropping a database is not a side effect of an
+  # uninstall.
+  databaseReclaimPolicy: retain
+{{- end }}
+{{- end }}

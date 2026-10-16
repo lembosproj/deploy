@@ -1,0 +1,166 @@
+{{- if eq (include "lembos.postgresql.mode" .) "simple" }}
+{{- $ctx := dict "root" . "component" "postgresql" -}}
+{{- $values := .Values.postgresql.simple -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}-init
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+data:
+  # One database per service, not one schema per service: each service is the only writer of its own data
+  # (ADR002), and a shared database is how that stops being true. Temporal creates its own two.
+  01-databases.sql: |
+    CREATE DATABASE "{{ .Values.postgresql.databases.identity }}";
+    CREATE DATABASE "{{ .Values.postgresql.databases.orchestrator }}";
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "lembos.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: tcp-postgresql
+      port: 5432
+      targetPort: postgresql
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ include "lembos.componentName" $ctx }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      # The official image runs as any UID when its data directory is already owned by it, so it never needs
+      # root; 999 is the image's own postgres user.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      {{- include "lembos.scheduling" (dict "root" . "values" $values) | nindent 6 }}
+      containers:
+        - name: postgresql
+          image: {{ include "lembos.image" $values.image }}
+          imagePullPolicy: {{ $values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          {{- with $values.parameters }}
+          args:
+            {{- range $name, $value := . }}
+            - -c
+            - {{ printf "%s=%v" $name $value | quote }}
+            {{- end }}
+          {{- end }}
+          ports:
+            - name: postgresql
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: {{ $values.username | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "lembos.postgresql.passwordRef" . | nindent 18 }}
+            # A subdirectory, because a volume's root may hold lost+found and initdb refuses a non-empty one.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ $values.username | quote }}, "-h", "127.0.0.1"]
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", {{ $values.username | quote }}, "-h", "127.0.0.1"]
+            initialDelaySeconds: 30
+            periodSeconds: 20
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: init
+          configMap:
+            name: {{ include "lembos.componentName" $ctx }}-init
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        {{- if not $values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+  {{- if $values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "lembos.selectorLabels" $ctx | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with $values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $values.persistence.size }}
+  {{- end }}
+{{- if .Values.networkPolicy.create }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  # The two services that own a database, and Temporal. Nothing else — the Portal and the Worker write
+  # through the APIs.
+  ingress:
+    - from:
+        {{- include "lembos.peer" (dict "root" . "component" "identity") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "orchestrator") | nindent 8 }}
+        {{- include "lembos.temporalServerPeer" . | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 5432}
+  egress: []
+{{- end }}
+{{- end }}

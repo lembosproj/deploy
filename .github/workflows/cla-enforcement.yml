@@ -1,0 +1,25 @@
+name: CLA Enforcement
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+    branches-ignore:
+      - "dependabot/**"
+
+jobs:
+  enforce-cla:
+    if: ${{ github.actor != 'dependabot[bot]' }}
+    name: Enforce CLA Agreement
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for CLA Signature
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const prBody = context.payload.pull_request.body;
+            const claPattern = /- \[x\] \*\*CLA Signed\*\*/i;
+
+            if (!prBody || !claPattern.test(prBody)) {
+              core.setFailed('Legal Requirement: You must check the "CLA Signed" box in the PR description to contribute to Lembos IDP.');
+            } else {
+              console.log('CLA agreement verified in PR body.');
+            }

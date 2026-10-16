@@ -1,0 +1,18 @@
+{
+    "default": true,
+    "ul-indent":                       false,
+    "ul-style":                        false,
+    "no-trailing-spaces":              false,
+    "line-length":                     false,
+    "blanks-around-headings":          false,
+    "no-duplicate-heading":            { "siblings_only": true },
+    "//":                              "LEPs and ADRs carry a `title` in YAML front matter and an H1 in the body, by template. front_matter_title is cleared so the front-matter title is not counted as the document's first heading.",
+    "single-title":                    { "front_matter_title": "" },
+    "no-trailing-punctuation":         false,
+    "blanks-around-fences":            false,
+    "blanks-around-lists":             false,
+    "no-inline-html":                  { "allowed_elements": [ "summary", "details", "kbd", "br" ]},
+    "no-bare-urls":                    false,
+    "single-trailing-newline":         false,
+    "emphasis-style":                  false
+}

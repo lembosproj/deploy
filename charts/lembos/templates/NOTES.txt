@@ -1,0 +1,37 @@
+Lembos {{ .Chart.AppVersion }} is installing into {{ .Release.Namespace }}.
+
+Published at:
+  Portal        {{ include "lembos.origin" (dict "root" . "component" "portal") }}
+  Identity      {{ include "lembos.origin" (dict "root" . "component" "identity") }}   (OIDC issuer)
+  Orchestrator  {{ include "lembos.origin" (dict "root" . "component" "orchestrator") }}/graphql
+{{- range include "lembos.routes" . | fromJsonArray }}
+{{- if eq .component "temporal-ui" }}
+  Temporal UI   {{ $.Values.global.publicScheme }}://{{ .host }}   (no authentication of its own)
+{{- else if eq .component "mailpit" }}
+  Mail          {{ $.Values.global.publicScheme }}://{{ .host }}   (every message Identity sends)
+{{- end }}
+{{- end }}
+{{- if and .Values.temporal.ui.enabled (not .Values.temporal.ui.ingress.enabled) }}
+
+Temporal UI (internal; no authentication of its own):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "lembos.componentName" (dict "root" . "component" "temporal-ui") }} 8080:8080
+{{- end }}
+
+Identity's account-management listener ({{ .Values.identity.adminPort }}) is internal only: Service
+{{ include "lembos.componentName" (dict "root" . "component" "identity") }}-admin, reachable from the Worker alone.
+
+Sign in as {{ .Values.platform.userManagement.bootstrapAdmin.email }}.
+{{- if not .Values.secrets.existingSecret }} The password:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "lembos.secretName" . }} \
+    -o jsonpath='{.data.identity-admin-password}' | base64 -d; echo
+{{- end }}
+{{- if and .Values.ingress.tls.enabled .Values.ingress.tls.generate (not .Values.ingress.tls.secretName) }}
+
+TLS uses a CA this chart generated. Trust it in your browser:
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "lembos.fullname" . }}-ingress-ca \
+    -o jsonpath='{.data.ca\.crt}' | base64 -d > lembos-ca.crt
+{{- end }}
+
+Keys and secrets the setup job generated are not part of the release: uninstalling leaves them, because
+every token, session and stored credential is encrypted under them. Back them up:
+  kubectl -n {{ .Release.Namespace }} get secret -l app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/managed-by=lembos-setup -o yaml

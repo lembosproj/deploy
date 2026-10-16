@@ -1,0 +1,61 @@
+# Lembos with every component and dependency highly available, for a release named `lembos`.
+#
+#   Services    two replicas each, spread across nodes, with PodDisruptionBudgets; the Orchestrator and the
+#               Worker autoscale.
+#   PostgreSQL  three CloudNativePG instances with automated failover. Needs the CloudNativePG operator,
+#               1.25 or later, installed first — see the chart README's Prerequisites.
+#   Redis       three Redis nodes under Sentinel, behind two HAProxy replicas that follow the primary.
+#   Temporal    every server service at two replicas.
+#
+#   helm repo add dandydeveloper https://dandydeveloper.github.io/charts
+#   helm repo add temporal https://go.temporal.io/helm-charts
+#   helm dependency build charts/lembos
+#   helm upgrade --install lembos charts/lembos -n lembos --create-namespace -f charts/lembos/values-ha.yaml \
+#     --set global.domain=<your domain> --set identity.smtp.endpoint=smtp://<relay>:25
+#
+# Under another release name, the chart fails with the names to change; they are marked below.
+
+installMode: high-available
+
+# Helm renders a dependency from a boolean in its own values, so the two upstream charts are switched on
+# here as well as by installMode.
+redis-ha:
+  enabled: true
+
+temporal-ha:
+  enabled: true
+  server:
+    config:
+      persistence:
+        datastores:
+          default:
+            sql:
+              # Release-prefixed: the CloudNativePG Cluster's read-write Service, its owner role and that
+              # role's Secret.
+              connectAddr: lembos-postgresql-rw:5432
+              user: lembos
+              existingSecret: lembos-postgresql-app
+              secretKey: password
+              # This chart creates the databases as Database resources; the owner role cannot.
+              createDatabase: false
+          visibility:
+            sql:
+              connectAddr: lembos-postgresql-rw:5432
+              user: lembos
+              existingSecret: lembos-postgresql-app
+              secretKey: password
+              createDatabase: false
+
+postgresql:
+  highAvailable:
+    storage:
+      size: 20Gi
+
+portal:
+  ingress:
+    # A Blazor Server circuit lives in the replica that started it: more than one replica needs affinity.
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+      nginx.ingress.kubernetes.io/affinity: cookie
+      nginx.ingress.kubernetes.io/session-cookie-name: lembos-portal-affinity

@@ -1,0 +1,40 @@
+{{- /*
+Identity's share of the platform contract, as an appsettings file. Secrets are not in it: they arrive as
+environment variables from Secrets, which override anything here.
+*/ -}}
+{{- $ctx := dict "root" . "component" "identity" -}}
+{{- $portal := include "lembos.origin" (dict "root" . "component" "portal") -}}
+{{- $orchestrator := include "lembos.origin" (dict "root" . "component" "orchestrator") -}}
+{{- $settings := include "lembos.commonSettings" . | fromJson -}}
+
+{{- /* The port Identity checks every admin request arrived on. Kestrel listens on it too; see the Deployment. */ -}}
+{{- $_ := set $settings "Admin" (dict "Port" (int .Values.identity.adminPort)) -}}
+
+{{- /*
+The issuer is the public origin: it is compared against every token's `iss`, so it is the name browsers and
+the other services use rather than this pod's address.
+*/ -}}
+{{- $_ := set $settings "OpenIdConnect" (dict
+  "Issuer" (include "lembos.origin" $ctx)
+  "Applications" (dict
+    "portal" (dict "BaseUrl" $portal)
+    "orchestrator" (dict "BaseUrl" $orchestrator))) -}}
+{{- $_ := set $settings "Cors" (dict "AllowedOrigins" (printf "%s;%s" $portal $orchestrator)) -}}
+
+{{- $identity := dict
+  "DefaultAdmin" (dict "Email" .Values.platform.userManagement.bootstrapAdmin.email)
+  "Email" (dict "FromAddress" .Values.identity.email.fromAddress "FromName" .Values.identity.email.fromName) -}}
+{{- if .Values.platform.integrations.gitHub.enabled -}}
+{{- $_ := set $identity "ExternalProviders" (dict "GitHub" (dict "Enabled" true)) -}}
+{{- end -}}
+{{- $_ := set $settings "Identity" $identity -}}
+
+{{- $_ := set $settings "WorkflowTriggers" (include "lembos.workflowTriggerSettings" . | fromJson) -}}
+
+{{- $connections := dict "temporal" (include "lembos.temporal.address" .) -}}
+{{- with include "lembos.smtp.endpoint" . -}}
+{{- $_ := set $connections "smtp" (printf "Endpoint=%s" .) -}}
+{{- end -}}
+{{- $_ := set $settings "ConnectionStrings" $connections -}}
+
+{{- include "lembos.settingsConfigMap" (dict "ctx" $ctx "settings" $settings) }}

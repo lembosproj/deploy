@@ -1,0 +1,50 @@
+{{- /*
+Autoscaling, per service: by default the Orchestrator and the Worker in a high-available install (see
+lembos.autoscaling). Two things to know before turning it on for the others: the Portal needs sticky
+sessions at the ingress once it has more than one replica (a Blazor Server circuit lives where it started),
+and every replica of Identity and the Orchestrator applies migrations at startup.
+*/ -}}
+{{- range $component := list "identity" "orchestrator" "portal" "worker" }}
+{{- $values := index $.Values $component }}
+{{- $ctx := dict "root" $ "component" $component }}
+{{- with $values.autoscaling }}
+{{- if include "lembos.autoscaling" $ctx }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "lembos.componentName" $ctx }}
+  minReplicas: {{ .minReplicas }}
+  maxReplicas: {{ .maxReplicas }}
+  metrics:
+    {{- with .targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+    {{- end }}
+    {{- with .targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+    {{- end }}
+  {{- with .behavior }}
+  behavior:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}

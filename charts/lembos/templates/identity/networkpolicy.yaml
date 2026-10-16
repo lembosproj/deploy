@@ -1,0 +1,55 @@
+{{- if .Values.networkPolicy.create }}
+{{- $ctx := dict "root" . "component" "identity" -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # People and OpenID Connect, through the ingress controller only. The other services reach this
+    # listener the same way, at the public origin that is their token issuer.
+    - from:
+        {{- include "lembos.ingressControllerPeer" . | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 8080}
+    # The account-management listener: the Worker, and nothing else.
+    - from:
+        {{- include "lembos.peer" (dict "root" . "component" "worker") | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.identity.adminPort }}}
+  egress:
+    {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.postgresqlEgress" . | nindent 4 }}
+    {{- include "lembos.redisEgress" . | nindent 4 }}
+    {{- include "lembos.temporalEgress" . | nindent 4 }}
+    {{- if .Values.identity.smtp.endpoint }}
+    - ports:
+        - {protocol: TCP, port: {{ .Values.identity.smtp.port }}}
+    {{- else if .Values.mailpit.enabled }}
+    - to:
+        {{- include "lembos.peer" (dict "root" . "component" "mailpit") | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 1025}
+    {{- end }}
+    {{- if .Values.platform.integrations.gitHub.enabled }}
+    # GitHub sign-in: the code exchange and the user lookup.
+    {{- with .Values.networkPolicy.externalHttps }}
+    - to:
+        {{- range .cidrs }}
+        - ipBlock:
+            cidr: {{ . }}
+        {{- end }}
+      ports:
+        {{- range .ports }}
+        - {protocol: TCP, port: {{ . }}}
+        {{- end }}
+    {{- end }}
+    {{- end }}
+{{- end }}

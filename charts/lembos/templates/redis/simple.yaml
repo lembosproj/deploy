@@ -1,0 +1,129 @@
+{{- if eq (include "lembos.redis.mode" .) "simple" }}
+{{- $ctx := dict "root" . "component" "redis" -}}
+{{- $values := .Values.redis.simple -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "lembos.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: tcp-redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  serviceName: {{ include "lembos.componentName" $ctx }}
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lembos.labels" $ctx | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- include "lembos.imagePullSecrets" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      {{- include "lembos.scheduling" (dict "root" . "values" $values) | nindent 6 }}
+      containers:
+        - name: redis
+          image: {{ include "lembos.image" $values.image }}
+          imagePullPolicy: {{ $values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          # Append-only, because the Portal's Data Protection key ring lives here: losing it signs everybody
+          # out and makes every stored token unreadable.
+          args:
+            - --requirepass
+            - $(REDIS_PASSWORD)
+            - --appendonly
+            - "yes"
+            - --dir
+            - /data
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  {{- include "lembos.redis.passwordRef" . | nindent 18 }}
+          ports:
+            - name: redis
+              containerPort: 6379
+          readinessProbe:
+            tcpSocket: {port: redis}
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: redis}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            {{- toYaml $values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      {{- if not $values.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if $values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "lembos.selectorLabels" $ctx | nindent 10 }}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with $values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $values.persistence.size }}
+  {{- end }}
+{{- if .Values.networkPolicy.create }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "lembos.selectorLabels" $ctx | nindent 6 }}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        {{- include "lembos.peer" (dict "root" . "component" "identity") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "orchestrator") | nindent 8 }}
+        {{- include "lembos.peer" (dict "root" . "component" "portal") | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: 6379}
+  egress: []
+{{- end }}
+{{- end }}

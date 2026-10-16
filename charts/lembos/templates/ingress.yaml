@@ -1,0 +1,43 @@
+{{- /*
+One Ingress per published route — the same hostname-per-service shape the development gateway gives them,
+so the issuer, redirect URIs and CORS origins derived from those names hold here too.
+*/ -}}
+{{- if .Values.ingress.enabled }}
+{{- range $route := include "lembos.routes" . | fromJsonArray }}
+{{- $ctx := dict "root" $ "component" $route.component }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+  {{- with (merge (deepCopy $route.annotations) $.Values.ingress.annotations) }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with $.Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if $.Values.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ $route.host | quote }}]
+      secretName: {{ include "lembos.ingressTlsSecret" (dict "root" $ "host" $route.host) }}
+  {{- end }}
+  rules:
+    - host: {{ $route.host | quote }}
+      http:
+        paths:
+          # Everything under the hostname, including the WebSockets the Portal's circuit and the
+          # Orchestrator's GraphQL subscriptions upgrade to.
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lembos.componentName" $ctx }}
+                port:
+                  name: http
+{{- end }}
+{{- end }}

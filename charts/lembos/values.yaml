@@ -1,0 +1,745 @@
+# Lembos — Helm values.
+#
+# The `platform` section below mirrors PlatformConfig (src/Lembos.AppHost/Platform/PlatformConfig.cs in
+# lembosproj/platform), the platform's configuration contract. The app host distributes each setting to the
+# components that act on it (PlatformConfiguration.Build); this chart's templates do the same distribution,
+# so a setting changed here reaches the same components it would under `aspire start`.
+#
+# Secrets are never written here in a GitOps repository. Every one of them can be generated at install
+# time, read from a Secret you manage, or — for a throwaway installation — given inline. See `secrets` and
+# `certificates`.
+
+# -- The release's shape, and the default for everything below that does not state its own:
+#
+#   simple          one pod per component and every dependency in the release, as `aspire start` runs them.
+#                   A laptop, an evaluation, a small installation.
+#   high-available  two replicas of each service spread across nodes, PodDisruptionBudgets, the Orchestrator
+#                   and the Worker autoscaling, and every dependency with failover (see `Dependencies`).
+#
+# A component's own `replicas`, `autoscaling.enabled` or `podDisruptionBudget.enabled`, and a dependency's own
+# `mode`, override it. A high-available install refuses a simple dependency: one PostgreSQL pod under two of
+# everything else is still one pod away from an outage.
+installMode: simple
+
+# -- Overrides the chart name in resource names.
+nameOverride: ""
+# -- Overrides the full resource-name prefix (default: <release>-lembos, or <release> when it contains "lembos").
+fullnameOverride: ""
+# -- Labels added to every resource.
+commonLabels: {}
+
+global:
+  # -- The DNS zone every published component is addressed under: identity.<domain>, portal.<domain>, …
+  # The OIDC issuer, redirect URIs and CORS origins are all derived from these names, so they must be the
+  # names a browser uses.
+  domain: lembos.example.com
+  # -- The scheme browsers use. Leave https: Identity refuses OpenID Connect requests that did not arrive
+  # over HTTPS, so TLS has to terminate at the ingress or gateway in front of it.
+  publicScheme: https
+  # -- ASPNETCORE_ENVIRONMENT for every service. Anything but Development makes the key-protection
+  # certificates and the signing key required, which is the point.
+  environment: Production
+
+  image:
+    # -- Registry the four service images are pulled from.
+    registry: ghcr.io
+    # -- Tag for the four service images. Defaults to the chart's appVersion.
+    tag: ""
+    pullPolicy: IfNotPresent
+  imagePullSecrets: []
+
+  # -- Annotations and labels added to every Lembos service pod.
+  podAnnotations: {}
+  podLabels: {}
+
+  # -- Pod security context for the four service pods. 1654 is the non-root `app` user the chiseled .NET
+  # images ship with.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1654
+    runAsGroup: 1654
+    fsGroup: 1654
+    seccompProfile:
+      type: RuntimeDefault
+  # -- Container security context for the four service containers.
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: [ALL]
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  # -- Host aliases for every Lembos pod. Useful when the public hostnames do not resolve inside the cluster:
+  # the services call Identity at its public origin, because that origin is the token issuer they validate.
+  hostAliases: []
+
+  # -- A Secret or ConfigMap holding extra CA certificates (PEM files) the services should trust — needed when
+  # the ingress certificate is issued by a private CA, since the services reach Identity through it.
+  trustedCertificates:
+    secretName: ""
+    configMapName: ""
+    # -- Which keys to mount. Empty mounts them all; name the certificate when the Secret also holds a key.
+    keys: []
+
+  # -- OpenTelemetry export. Empty endpoint means nothing is exported.
+  otel:
+    endpoint: ""
+    protocol: grpc
+    headers: ""
+
+# ── The platform contract ──
+#
+# Mirrors the platform's PlatformConfig. Its documentation explains each setting; the comments here say only
+# where a chart differs.
+platform:
+  userManagement:
+    # -- SelfManaged (administrators invite people) or DirectorySourced (an external directory decides).
+    mode: SelfManaged
+    bootstrapAdmin:
+      # -- The administrator seeded on first start, in Identity and the Orchestrator under one identifier.
+      # The password is a secret: `secrets.identityAdminPassword`.
+      email: admin@lembos.local
+
+  # -- Only consulted when userManagement.mode is DirectorySourced.
+  directory:
+    provider: GitHub
+    syncInterval: "00:15:00"
+    # -- Directory group → built-in role (Contributor, Maintainer, Administrator). Empty keeps roles the
+    # platform's own; the first binding hands that authority to the directory for everybody.
+    roleBindings: {}
+    deprovisioning:
+      minimumRosterForRatio: 10
+      maxRatio: 0.2
+      maxAbsolute: 5
+
+  integrations:
+    gitHub:
+      # -- Turns on GitHub sign-in in Identity and the GitHub App roster read in the Worker. Requires the five
+      # `secrets.gitHub` values, which cannot be generated.
+      enabled: false
+
+  workflowTriggers:
+    enabled: true
+    pollInterval: "00:00:01"
+    batchSize: 32
+    leaseDuration: "00:01:00"
+    initialRetryDelay: "00:00:05"
+    maximumRetryDelay: "00:05:00"
+
+# ── Secrets ──
+#
+# Generated by the setup job (`setup` below), a pre-install/pre-upgrade hook that runs before anything else
+# in the release. Each value is resolved in this order:
+#   1. `existingSecret` — a Secret you manage (Sealed Secrets, External Secrets, SOPS, …) holding every key
+#      listed in the chart README. The job then leaves that Secret alone.
+#   2. the value given here, which the job writes.
+#   3. the value already in the cluster, which the job keeps.
+#   4. generated by the job.
+#
+# The Secrets the job creates are not part of the release: `helm uninstall` and an Argo CD prune both leave
+# them, because every token, session and stored credential is encrypted under them. Nothing is rotated by a
+# sync either — the cluster is the record, so rendering the chart again generates nothing. Rotating a value
+# is deleting that key (or Secret) and running an upgrade.
+secrets:
+  # -- A Secret you manage, holding all the keys below. When set, nothing in this section is generated.
+  existingSecret: ""
+
+  # -- OAuth client secrets Identity registers and each client authenticates with. Same string on both
+  # sides, which is why the chart, not each service, owns them.
+  clientSecrets:
+    orchestrator: ""
+    portal: ""
+    driftReconciler: ""
+    agentRunner: ""
+    directorySynchronizer: ""
+    executionAgent: ""
+
+  # -- Identity's token encryption key: 32 random bytes, base64-encoded.
+  identityEncryptionKey: ""
+  # -- The bootstrap administrator's password. Generated passwords satisfy Identity's password policy.
+  identityAdminPassword: ""
+  # -- The PostgreSQL password, for the simple server or the high-available cluster's owner role. Letters
+  # and digits when generated, because it is spliced into connection strings.
+  postgresPassword: ""
+  # -- The Redis password, for the simple server or redis-ha.
+  redisPassword: ""
+
+  # -- GitHub credentials. Required when platform.integrations.gitHub.enabled; never generated, because
+  # GitHub issues them.
+  gitHub:
+    # -- A Secret holding the five keys below (github-app-id, github-app-org, github-private-key-base64,
+    # github-client-id, github-client-secret). Takes precedence over the inline values.
+    existingSecret: ""
+    appId: ""
+    organization: ""
+    privateKeyBase64: ""
+    clientId: ""
+    clientSecret: ""
+
+# ── Certificates and keys ──
+#
+# Four key pairs, each a kubernetes.io/tls Secret, resolved in this order:
+#   1. `existingSecret` — one you manage, for instance issued by cert-manager. Give it a long duration and
+#      `privateKey.rotationPolicy: Never`: rotating a key-protection certificate makes the key ring it
+#      encrypted unreadable.
+#   2. `certificate` + `privateKey` given here, as PEM.
+#   3. the pair already in the cluster.
+#   4. a self-signed pair the setup job generates, valid for `validityDays`.
+#
+# Self-signed is correct for all four: nothing validates a chain for them. They are key pairs with a
+# wrapper, not identities. The app host makes its own with the same setup tool, the same way.
+certificates:
+  # -- Signs the tokens Identity issues. Only the private key is used.
+  identitySigning:
+    existingSecret: ""
+    certificate: ""
+    privateKey: ""
+    subject: Lembos Identity Signing
+    validityDays: 3650
+  # -- Encrypts Identity's Data Protection key ring.
+  identityDataProtection:
+    existingSecret: ""
+    certificate: ""
+    privateKey: ""
+    subject: Lembos Data Protection
+    validityDays: 3650
+  # -- Encrypts the Orchestrator's Data Protection key ring — which protects every execution target's
+  # credentials.
+  orchestratorDataProtection:
+    existingSecret: ""
+    certificate: ""
+    privateKey: ""
+    subject: Lembos Orchestrator Data Protection
+    validityDays: 3650
+  # -- Encrypts the Portal's Data Protection key ring, held in Redis beside the tokens it protects.
+  portalDataProtection:
+    existingSecret: ""
+    certificate: ""
+    privateKey: ""
+    subject: Lembos Portal Data Protection
+    validityDays: 3650
+
+# -- The setup job: a pre-install/pre-upgrade hook that makes every Secret above exist before the services
+# start. Its ServiceAccount may read, create and patch Secrets in the release namespace, and nothing else.
+setup:
+  image:
+    repository: lembosproj/setup
+    tag: ""
+  resources:
+    requests: {cpu: 50m, memory: 64Mi}
+    limits: {memory: 128Mi}
+
+# ── Publishing ──
+#
+# One Ingress (or HTTPRoute) per published component. Identity's account-management listener is never
+# published: it has its own ClusterIP Service and a NetworkPolicy that admits only the Worker.
+ingress:
+  # -- Create Ingress resources for identity, orchestrator and portal.
+  enabled: true
+  className: ""
+  # -- Annotations added to every Ingress — cert-manager issuers, timeouts, etc. The Portal is a Blazor
+  # Server app over a WebSocket, so long read timeouts belong here for most controllers.
+  annotations: {}
+  tls:
+    # -- Terminate TLS at the ingress.
+    enabled: true
+    # -- One Secret for every host (a wildcard certificate). Empty gives each host <host>-tls, which is what
+    # cert-manager's ingress-shim creates when an issuer annotation is set.
+    secretName: ""
+    # -- Have the setup job generate a CA and a wildcard certificate for *.<global.domain>, serve every host
+    # with it, and have the services trust the CA. For local clusters with no cert-manager — browsers need
+    # the CA imported (see the chart README). Kept like every other generated secret.
+    generate: false
+    generateValidityDays: 825
+
+# -- Gateway API HTTPRoutes, as an alternative or in addition to Ingress.
+gateway:
+  enabled: false
+  # -- The Gateway(s) the routes attach to.
+  parentRefs: []
+  #  - name: public
+  #    namespace: gateway-system
+  #    sectionName: https
+  annotations: {}
+  # -- Gateway API timeouts for the Portal's and Orchestrator's routes, which carry long-lived WebSockets.
+  # "0s" disables the request timeout where the implementation supports it (GEP-1742).
+  timeouts:
+    request: "0s"
+
+# ── Network policies ──
+networkPolicy:
+  # -- Create a NetworkPolicy per component: everything not listed below is denied, in both directions.
+  create: true
+  # -- Where published traffic comes from: the ingress controller's or gateway's pods. Used for ingress to
+  # the published components and for egress to it — the services call Identity at its public origin.
+  ingressController:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: ingress-nginx
+    podSelector: {}
+  # -- DNS. Every pod gets egress to it.
+  dns:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        k8s-app: kube-dns
+  # -- External HTTPS: Identity's public origin seen as a load-balancer address, GitHub, AWS. Narrow it
+  # when the egress gateway or proxy has a fixed address.
+  externalHttps:
+    cidrs: ["0.0.0.0/0"]
+    ports: [443]
+  # -- Who may reach the Temporal web UI on 8080, as NetworkPolicy peers — an internal ingress controller's
+  # namespace, a VPN or bastion namespace. Empty admits nobody but port-forward.
+  temporalWeb:
+    from: []
+  # -- The Worker reaches whatever a blueprint names — Terraform registries, git hosts, cloud APIs, target
+  # clusters on 6443. All egress by default; replace with explicit rules to narrow it.
+  workerEgress:
+    - {}
+
+# ── Components ──
+
+identity:
+  # -- Empty follows installMode: 1, or 2 when high-available.
+  replicas: ~
+  # -- Full public hostname. Default: identity.<global.domain>.
+  host: ""
+  image:
+    repository: lembosproj/identity
+    tag: ""
+  # -- The account-management listener. Internal only: a ClusterIP Service reachable from the Worker alone,
+  # never published, and the port Identity checks every admin request arrived on.
+  adminPort: 8430
+  # -- Where account email is sent: `smtp://host:port`. Empty sends to the release's MailPit when
+  # `mailpit.enabled`. One of the two is required outside Development: Identity refuses to start with nowhere
+  # to send invitations and password resets, rather than dropping them.
+  smtp:
+    endpoint: ""
+    # -- Port the NetworkPolicy opens for egress to the relay.
+    port: 25
+  email:
+    fromAddress: no-reply@lembos.local
+    fromName: Lembos
+  # -- Extra environment, as a list of EnvVar.
+  env: []
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 768Mi}
+  podAnnotations: {}
+  # -- A HorizontalPodAutoscaler instead of a fixed replica count. Empty follows installMode.
+  autoscaling:
+    enabled: ~
+    minReplicas: 2
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+  # -- Empty follows installMode: on when high-available.
+  podDisruptionBudget:
+    enabled: ~
+    minAvailable: 1
+  ingress:
+    enabled: true
+    annotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+orchestrator:
+  # -- Empty follows installMode: 1, or 2 when high-available.
+  replicas: ~
+  host: ""
+  image:
+    repository: lembosproj/orchestrator
+    tag: ""
+  # -- Seed the Northwind Retail sample catalog. Off outside Development, deliberately.
+  sampleData: false
+  env: []
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+  podAnnotations: {}
+  # -- A HorizontalPodAutoscaler instead of a fixed replica count. Empty follows installMode.
+  autoscaling:
+    enabled: ~
+    minReplicas: 2
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+  # -- Empty follows installMode: on when high-available.
+  podDisruptionBudget:
+    enabled: ~
+    minAvailable: 1
+  ingress:
+    enabled: true
+    # -- GraphQL subscriptions hold a WebSocket open for as long as a transcript streams, so idle timeouts at the proxy must outlast the
+    # keep-alive interval. Upgrades themselves need no annotation on mainstream controllers; these
+    # ingress-nginx ones raise its 60s default and are ignored by other controllers.
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+portal:
+  # -- Empty follows installMode: 1, or 2 when high-available. More than one replica needs sticky sessions
+  # at the ingress: a Blazor Server circuit lives in the replica that started it.
+  replicas: ~
+  host: ""
+  image:
+    repository: lembosproj/portal
+    tag: ""
+  env: []
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+  podAnnotations: {}
+  # -- A HorizontalPodAutoscaler instead of a fixed replica count. Empty follows installMode.
+  autoscaling:
+    enabled: ~
+    minReplicas: 2
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+  # -- Empty follows installMode: on when high-available.
+  podDisruptionBudget:
+    enabled: ~
+    minAvailable: 1
+  ingress:
+    enabled: true
+    # -- The Portal is Blazor Server: every session is a WebSocket circuit, so idle timeouts at the proxy must outlast the
+    # keep-alive interval. Upgrades themselves need no annotation on mainstream controllers; these
+    # ingress-nginx ones raise its 60s default and are ignored by other controllers.
+    annotations:
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+worker:
+  # -- Empty follows installMode: 1, or 2 when high-available. Ignored while autoscaling.
+  replicas: ~
+  image:
+    repository: lembosproj/worker
+    tag: ""
+  # -- Runs one pod executes at once.
+  maxConcurrentRuns: 4
+  # -- Each pod's workspace — runs, the pinned Terraform and Helm binaries, the provider cache — on a volume
+  # claimed with the pod and deleted with it (a generic ephemeral volume). One per pod, because the toolchain
+  # directory and the provider cache are single-writer; a volume rather than an emptyDir, because a provider
+  # cache runs to gigabytes the node's disk should not have to hold. A new pod downloads its toolchains once.
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: ""
+  env: []
+  resources:
+    requests: {cpu: 250m, memory: 512Mi}
+    limits: {memory: 2Gi}
+  podAnnotations: {}
+  # -- Runs arrive in bursts — publishing an environment fans out into one per stage — and each holds a
+  # terraform process, so the Worker scales on CPU. Needs a metrics server. Empty follows installMode: on when
+  # high-available.
+  autoscaling:
+    enabled: ~
+    minReplicas: 2
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 75
+    targetMemoryUtilizationPercentage: ""
+    # -- Slow to scale down: a pod removed mid-apply hands its run to another pod, which starts it again.
+    behavior:
+      scaleDown:
+        stabilizationWindowSeconds: 600
+  # -- Empty follows installMode: on when high-available.
+  podDisruptionBudget:
+    enabled: ~
+    minAvailable: 1
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# ── Dependencies ──
+#
+# PostgreSQL, Redis and Temporal each take a `mode`, which follows installMode unless stated:
+#
+#   simple          one instance in the release, as `aspire start` runs them — a PostgreSQL and a Redis
+#                   StatefulSet, Temporal's auto-setup server. A laptop, an evaluation, a small installation.
+#   high-available  failover: PostgreSQL as a CloudNativePG cluster (needs the operator), Redis
+#                   through the redis-ha chart, Temporal through its official chart. `values-ha.yaml` sets
+#                   all three.
+#   external        a managed or separately operated service.
+#
+# Only the block the mode names is read. The two upstream charts are the exception to one switch per
+# dependency: Helm decides whether to render a dependency from a boolean in that dependency's own values,
+# which a mode cannot set, so `redis-ha.enabled` and `temporal-ha.enabled` have to agree with their modes.
+# The install fails naming the value when they do not.
+#
+# Upstream charts cannot template their values from this chart's either, so the names they are given assume
+# a release called `lembos` (resource prefix `lembos-`). Under another release name, change the values marked
+# "release-prefixed" — the chart fails with the exact values to use if they disagree.
+
+postgresql:
+  # -- simple | high-available | external. Empty follows installMode.
+  mode: ""
+  # -- Database names, whichever mode. One database per service (ADR002); Temporal's two are its own.
+  databases:
+    identity: identity
+    orchestrator: orchestrator
+
+  # -- One PostgreSQL in the release.
+  simple:
+    image:
+      repository: docker.io/library/postgres
+      tag: "17.6"
+      pullPolicy: IfNotPresent
+    username: postgres
+    # -- Server settings, as `-c name=value` arguments. Temporal holds a pool per datastore on top of the
+    # services' own, so the default of 100 connections is raised.
+    parameters:
+      max_connections: "300"
+    # -- A Secret holding the password under `existingSecretPasswordKey`. Empty uses the release's own,
+    # generated by the setup job.
+    existingSecret: ""
+    existingSecretPasswordKey: postgres-password
+    persistence:
+      enabled: true
+      size: 10Gi
+      storageClass: ""
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 1Gi}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # -- A CloudNativePG Cluster with automated failover, rendered by this chart. Needs the CloudNativePG
+  # operator, 1.25 or later, installed in the cluster beforehand — the chart refuses to render without it
+  # (see the chart README's Prerequisites). One owner role holds every database, each a Database resource:
+  # the services migrate their own, Temporal sets up its two.
+  highAvailable:
+    instances: 3
+    # -- The PostgreSQL image the operator runs.
+    imageName: ghcr.io/cloudnative-pg/postgresql:17.6
+    # -- The role the services and Temporal connect as. Its password is the release's postgres-password,
+    # which the setup job copies into the basic-auth Secret CloudNativePG reads.
+    owner: lembos
+    # -- Temporal holds a pool per datastore per service per replica, on top of the services' own; the
+    # default of 100 is exhausted by two Temporal replicas alone.
+    parameters:
+      max_connections: "400"
+    storage:
+      size: 10Gi
+      storageClass: ""
+    resources: {}
+    # -- Spread across nodes. CloudNativePG's own default is zones, which a single-zone cluster cannot satisfy.
+    affinity:
+      topologyKey: kubernetes.io/hostname
+
+  # -- An existing PostgreSQL. The user needs CREATEDB, or the databases must exist: each service migrates
+  # its own at startup, and Temporal creates its two.
+  external:
+    host: ""
+    port: 5432
+    username: ""
+    password: ""
+    existingSecret: ""
+    existingSecretPasswordKey: postgres-password
+    # -- Npgsql's SSL Mode: Disable, Prefer, Require, VerifyCA, VerifyFull.
+    sslMode: Prefer
+    # -- Appended to both connection strings, e.g. "Maximum Pool Size=50".
+    extraConnectionParameters: ""
+
+redis:
+  # -- simple | high-available | external. Empty follows installMode. high-available is configured under
+  # `redis-ha`.
+  mode: ""
+
+  # -- One Redis in the release. It holds the Portal's Data Protection key ring, so it is persisted.
+  simple:
+    image:
+      repository: docker.io/library/redis
+      tag: "8.2"
+      pullPolicy: IfNotPresent
+    existingSecret: ""
+    existingSecretPasswordKey: redis-password
+    persistence:
+      enabled: true
+      size: 2Gi
+      storageClass: ""
+    resources:
+      requests: {cpu: 50m, memory: 64Mi}
+      limits: {memory: 512Mi}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  external:
+    host: ""
+    port: 6379
+    password: ""
+    existingSecret: ""
+    existingSecretPasswordKey: redis-password
+    tls: false
+
+# -- Redis under Sentinel when redis.mode is high-available, through the redis-ha chart — the one Argo CD
+# runs its own Redis with. HAProxy in front always routes to the current primary, so the services keep a
+# plain host:port connection string.
+redis-ha:
+  # -- true exactly when Redis is high-available (redis.mode, or installMode when that is empty).
+  enabled: false
+  replicas: 3
+  auth: true
+  # -- Release-prefixed: the release's own Secret, where the setup job keeps redis-password.
+  existingSecret: lembos-secrets
+  authKey: redis-password
+  haproxy:
+    enabled: true
+    replicas: 2
+  persistentVolume:
+    enabled: true
+    size: 2Gi
+  hardAntiAffinity: true
+
+temporal:
+  # -- simple | high-available | external. Empty follows installMode. high-available is configured under
+  # `temporal-ha`.
+  mode: ""
+
+  # -- Temporal's auto-setup server — the image `aspire start` runs. One process for every Temporal
+  # service; it creates its two databases, applies the schema and registers the `default` namespace on start.
+  simple:
+    image:
+      repository: docker.io/temporalio/auto-setup
+      # Kept equal to the app host's (src/Lembos.AppHost/Extensions/TemporalResource.cs).
+      tag: "1.29"
+      pullPolicy: IfNotPresent
+    # -- How long a closed workflow's history is kept in the `default` namespace.
+    retention: 72h
+    # -- Temporal's dynamic configuration, in its own file format. Every flag defaults to off in the server,
+    # so this is what is on — see src/Lembos.AppHost/dynamicconfig/development.yaml.
+    dynamicConfig:
+      frontend.WorkerHeartbeatsEnabled:
+        - value: true
+      frontend.ListWorkersEnabled:
+        - value: true
+    resources:
+      requests: {cpu: 100m, memory: 256Mi}
+      limits: {memory: 1Gi}
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
+  # -- An existing Temporal frontend. Plain gRPC on the `default` namespace; the services do not speak TLS
+  # or API keys to Temporal yet, so Temporal Cloud is not supported.
+  external:
+    host: ""
+    port: 7233
+
+  # -- The web UI, in every mode, pointed at whichever frontend the mode gives. It has no authentication of
+  # its own, so it is an internal ClusterIP Service unless published here — and then only on a laptop or
+  # behind an internal ingress class. See the chart README.
+  ui:
+    enabled: true
+    image:
+      repository: docker.io/temporalio/ui
+      # Kept equal to the app host's.
+      tag: "2.53.1"
+      pullPolicy: IfNotPresent
+    resources:
+      requests: {cpu: 25m, memory: 64Mi}
+      limits: {memory: 256Mi}
+    ingress:
+      enabled: false
+      # -- Default: temporal.<global.domain>.
+      host: ""
+      annotations: {}
+
+# -- Temporal when temporal.mode is high-available, through its official chart: frontend, history, matching
+# and worker as separate Deployments, a schema job and the `default` namespace. Raise `server.replicaCount`
+# (or each service's own) for more than one of each.
+temporal-ha:
+  # -- true exactly when Temporal is high-available (temporal.mode, or installMode when that is empty).
+  enabled: false
+  server:
+    replicaCount: 2
+    config:
+      # Fixed for the life of the cluster: changing it later needs a new persistence store.
+      persistence:
+        numHistoryShards: 512
+        datastores:
+          default:
+            sql:
+              pluginName: postgres12
+              databaseName: temporal
+              # -- Release-prefixed: the PostgreSQL Service and port.
+              connectAddr: lembos-postgresql:5432
+              connectProtocol: tcp
+              user: postgres
+              # -- Release-prefixed: the release's own Secret, where the setup job keeps postgres-password.
+              existingSecret: lembos-secrets
+              secretKey: postgres-password
+              # False under a high-available PostgreSQL, which creates the databases itself.
+              createDatabase: true
+              # Per service and replica: four services, two stores.
+              maxConns: 10
+              maxIdleConns: 5
+              maxConnLifetime: 1h
+          visibility:
+            sql:
+              pluginName: postgres12
+              databaseName: temporal_visibility
+              connectAddr: lembos-postgresql:5432
+              connectProtocol: tcp
+              user: postgres
+              existingSecret: lembos-secrets
+              secretKey: postgres-password
+              createDatabase: true
+              maxConns: 10
+              maxIdleConns: 5
+              maxConnLifetime: 1h
+      namespaces:
+        create: true
+        namespace:
+          - name: default
+            retention: 3d
+    dynamicConfig:
+      frontend.WorkerHeartbeatsEnabled:
+        - value: true
+      frontend.ListWorkersEnabled:
+        - value: true
+  # The schema job as an ordinary Job rather than a pre-install hook: a hook runs before the database in
+  # this release exists and would wait for it forever. It retries until PostgreSQL answers.
+  schema:
+    useHelmHooks: false
+  admintools:
+    enabled: false
+  # The UI is temporal.ui, the same in every mode.
+  web:
+    enabled: false
+
+# -- A mail catcher, as `aspire start` runs one: Identity's mail lands in MailPit's web UI instead of a
+# mailbox. For a laptop or a demo only — every invitation and password-reset link is readable by anyone who
+# can reach that UI.
+mailpit:
+  enabled: false
+  image:
+    repository: docker.io/axllent/mailpit
+    # Kept equal to the app host's.
+    tag: v1.22.3
+    pullPolicy: IfNotPresent
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+  ingress:
+    enabled: true
+    # -- Default: mail.<global.domain>.
+    host: ""
+    annotations: {}
+
+# -- Extra manifests rendered with the release. Strings are rendered as templates.
+extraObjects: []
