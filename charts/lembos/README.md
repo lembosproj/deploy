@@ -121,15 +121,15 @@ toolchain directory and the provider cache are single-writer; a shared volume wo
 unzipping into one path. A new pod downloads its toolchains once.
 
 **Every image is signed** when it is published, keylessly, with the identity of the workflow that built it
-(`.github/workflows/deployment-artifacts.yml` in `lembosproj/platform`, on a version tag), and the signature is
+(`.github/workflows/release.yml` in `lembosproj/platform`, running on `main`), and the signature is
 recorded in the Rekor transparency log. Verify one before trusting it, by digest rather than by tag — a tag
 can be moved after signing and a signature over a digest cannot:
 
 ```shell
 cosign verify \
-  --certificate-identity-regexp '^https://github.com/lembosproj/platform/\.github/workflows/deployment-artifacts\.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github.com/lembosproj/platform/\.github/workflows/release\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/lembosproj/platform/orchestrator:0.1.0
+  ghcr.io/lembosproj/platform/orchestrator:0.0.1
 ```
 
 An admission controller that checks signatures (Kyverno, Sigstore's policy controller) takes the same two
