@@ -442,7 +442,8 @@ until a CommunityToolkit release carries it.
 Docker with about 4 CPUs and 8 GiB of memory to spare, the .NET 10 SDK, the [Aspire CLI](https://aspire.dev)
 with a trusted developer certificate (`aspire certs trust`), and ports 80, 443 and 3000 free. Traefik is
 published on 80 and 443 because `identity.dev.localhost` with no port is the issuer every service validates;
-Grafana is on 3000. `kubectl` is optional, for looking inside.
+Grafana is on 3000. `kubectl` is optional, for looking inside; `source scripts/k3s-env.sh` points it at the
+cluster and gives you `k`, `kubectl` in the `lembos` namespace.
 
 ### Start
 
@@ -484,8 +485,8 @@ with the cluster and writes the addresses into the `coredns-custom` ConfigMap �
 Sign in as `admin@lembos.local`, with the password the setup job generated:
 
 ```shell
-export KUBECONFIG=aspire/Lembos.Deploy.AppHost/.k3s/k3s/local/kubeconfig.yaml
-kubectl -n lembos get secret lembos-secrets -o jsonpath='{.data.identity-admin-password}' | base64 -d; echo
+source scripts/k3s-env.sh     # KUBECONFIG for the app host's cluster, and `k` for kubectl in lembos
+lembos-admin-password         # the identity-admin-password key of lembos-secrets, decoded
 ```
 
 ### Observing it
@@ -514,7 +515,7 @@ over several minutes and a fresh start takes a couple of minutes to fill in.
 the platform dashboard, or:
 
 ```shell
-kubectl -n lembos get hpa,pods -l app.kubernetes.io/component=worker -w
+k get hpa,pods -l app.kubernetes.io/component=worker -w
 ```
 
 ### Another platform release, or a changed value
@@ -536,9 +537,9 @@ docker volume ls | grep -E 'lembos.deploy|lembos-deploy'   # the volumes left be
 
 | Symptom                                    | Look at                                                                       |
 |--------------------------------------------|-------------------------------------------------------------------------------|
-| `lembos` fails after ten minutes           | `kubectl -n lembos get pods`, then the logs of whichever is not ready         |
+| `lembos` fails after ten minutes           | `k get pods`, then the logs of whichever is not ready                         |
 | A service cannot reach PostgreSQL or Redis | The `k3s-dns` logs: each `<name> -> <address>` it wrote                       |
-| The install fails before anything starts   | `kubectl -n lembos logs job/lembos-setup` — the setup job's own report        |
+| The install fails before anything starts   | `k logs job/lembos-setup` — the setup job's own report                        |
 | Nothing answers on `*.dev.localhost`       | Something else holds 80 or 443, so the `k3s` container could not publish them |
 | The browser warns about the certificate    | The developer certificate is not trusted yet: `aspire certs trust`            |
 | A dashboard panel says "No data"           | Nothing has happened yet — no 5xx, no failed trace — or the first minutes     |

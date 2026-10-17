@@ -20,7 +20,8 @@ The app host installs **this directory's** chart with `aspire/Lembos.Deploy.AppH
 `http://localhost:3000` (dashboards in `charts/lembos/dashboards`, shipped by the chart too). It uses
 the k3s integration as `Lab.Aspire.Hosting.K3s`, a build of the CommunityToolkit pull request, until a
 release carries it. Its kubeconfig is
-`aspire/Lembos.Deploy.AppHost/.k3s/k3s/local/kubeconfig.yaml`.
+`aspire/Lembos.Deploy.AppHost/.k3s/k3s/local/kubeconfig.yaml`; `source scripts/k3s-env.sh` exports it and adds
+`k` (kubectl in `lembos`) and `lembos-admin-password`.
 
 `.github/workflows/chart.yml` also renders every values file through `kubeconform -strict`; copy its loop to
 reproduce a failure.
