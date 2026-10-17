@@ -32,8 +32,8 @@ export default {
       {
         // No comments on issues and pull requests: they need write permissions on both for a line nobody
         // asked for, and the release notes already link every commit.
-        successComment: false,
-        failComment: false,
+        successCommentCondition: false,
+        failCommentCondition: false,
         releasedLabels: false,
         assets: [{ path: "dist/lembos-*.tgz", label: "Helm chart" }],
       },
