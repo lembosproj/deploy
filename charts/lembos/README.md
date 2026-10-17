@@ -25,14 +25,14 @@ to send invitations and password resets, so the chart refuses to render first.
 
 ## Prerequisites
 
-| When                                         | Needs                                                        | Checked by the chart |
-|----------------------------------------------|--------------------------------------------------------------|----------------------|
-| Always                                       | Kubernetes 1.27+, an ingress controller or a Gateway         | —                    |
-| Installing from a checkout                   | `helm dependency build` (fetches `redis-ha`, `temporal-ha`)  | Helm                 |
-| `postgresql.mode: high-available`            | The CloudNativePG operator, 1.25 or later                    | Yes                  |
-| `gateway.enabled`                            | Gateway API CRDs (`gateway.networking.k8s.io/v1`)            | Yes                  |
-| Autoscaling (on in a high-available install) | A metrics server                                             | —                    |
-| `worker.autoscaling.scaler: keda`            | KEDA 2.17 or later                                           | Yes                  |
+| When                                         | Needs                                                       | Checked by the chart |
+|----------------------------------------------|-------------------------------------------------------------|----------------------|
+| Always                                       | Kubernetes 1.27+, an ingress controller or a Gateway        | —                    |
+| Installing from a checkout                   | `helm dependency build` (fetches `redis-ha`, `temporal-ha`) | Helm                 |
+| `postgresql.mode: high-available`            | The CloudNativePG operator, 1.25 or later                   | Yes                  |
+| `gateway.enabled`                            | Gateway API CRDs (`gateway.networking.k8s.io/v1`)           | Yes                  |
+| Autoscaling (on in a high-available install) | A metrics server                                            | —                    |
+| `worker.autoscaling.scaler: keda`            | KEDA 2.17 or later                                          | Yes                  |
 
 **High-available PostgreSQL is a CloudNativePG cluster**, and the operator is the one thing this chart cannot
 bring with it. The chart renders the `Cluster` and the `Database` resources; the operator, installed once per
@@ -81,18 +81,18 @@ thing under `aspire start` and in a cluster.
 
 ## What gets installed
 
-| Component    | Kind                      | Published               | Notes                                                    |
-|--------------|---------------------------|-------------------------|----------------------------------------------------------|
-| Setup job    | Job (pre-install hook)    | —                       | Makes every Secret exist before anything else starts     |
-| Identity     | Deployment                | `identity.<domain>`     | The OIDC issuer. Its admin listener is internal only     |
-| Orchestrator | Deployment                | `orchestrator.<domain>` | `/graphql`, including subscriptions over WebSocket       |
-| Portal       | Deployment                | `portal.<domain>`       | Blazor Server: every session is a WebSocket circuit      |
-| Worker       | Deployment                | —                       | Reached by nobody; a workspace volume per pod            |
-| PostgreSQL   | StatefulSet, or Cluster   | —                       | `postgresql.mode`; HA needs the CloudNativePG operator   |
-| Redis        | StatefulSet, or redis-ha  | —                       | `redis.mode`                                             |
-| Temporal     | auto-setup, or its chart  | —                       | `temporal.mode`                                          |
-| Temporal UI  | Deployment                | `temporal.<domain>`     | Internal unless `temporal.ui.ingress.enabled`            |
-| MailPit      | Deployment                | `mail.<domain>`         | Only with `mailpit.enabled`; catches Identity's mail     |
+| Component    | Kind                     | Published               | Notes                                                  |
+|--------------|--------------------------|-------------------------|--------------------------------------------------------|
+| Setup job    | Job (pre-install hook)   | —                       | Makes every Secret exist before anything else starts   |
+| Identity     | Deployment               | `identity.<domain>`     | The OIDC issuer. Its admin listener is internal only   |
+| Orchestrator | Deployment               | `orchestrator.<domain>` | `/graphql`, including subscriptions over WebSocket     |
+| Portal       | Deployment               | `portal.<domain>`       | Blazor Server: every session is a WebSocket circuit    |
+| Worker       | Deployment               | —                       | Reached by nobody; a workspace volume per pod          |
+| PostgreSQL   | StatefulSet, or Cluster  | —                       | `postgresql.mode`; HA needs the CloudNativePG operator |
+| Redis        | StatefulSet, or redis-ha | —                       | `redis.mode`                                           |
+| Temporal     | auto-setup, or its chart | —                       | `temporal.mode`                                        |
+| Temporal UI  | Deployment               | `temporal.<domain>`     | Internal unless `temporal.ui.ingress.enabled`          |
+| MailPit      | Deployment               | `mail.<domain>`         | Only with `mailpit.enabled`; catches Identity's mail   |
 
 Each service has its own ServiceAccount with no token mounted, a NetworkPolicy, and a
 HorizontalPodAutoscaler and PodDisruptionBudget as `installMode` or its own settings decide.
@@ -311,14 +311,14 @@ fractions of the limits in `worker.resources`, and the workspace volume has `min
 after `reservedDiskPerRunMegabytes` for every run in flight. The first run is admitted on the disk check
 alone. A run held back stays on its Temporal queue — it costs the pod nothing and counts as backlog.
 
-| Value                                          | Default   | Meaning                                                              |
-|------------------------------------------------|-----------|----------------------------------------------------------------------|
-| `worker.maxConcurrentRuns`                     | 4         | The ceiling, whatever the measurements say                           |
-| `worker.capacity.targetCpuUsage`               | 0.8       | Admit while CPU is under this fraction of the pod's quota            |
-| `worker.capacity.targetMemoryUsage`            | 0.8       | Admit while memory is under this fraction of the pod's limit         |
-| `worker.capacity.minimumFreeDiskMegabytes`     | 1024      | Never go below this on the workspace volume                          |
-| `worker.capacity.reservedDiskPerRunMegabytes`  | 512       | What a run in flight may still write                                 |
-| `worker.cacheRetention`                        | 30 days   | Evict cached providers and tool versions no run has used for this    |
+| Value                                         | Default | Meaning                                                           |
+|-----------------------------------------------|---------|-------------------------------------------------------------------|
+| `worker.maxConcurrentRuns`                    | 4       | The ceiling, whatever the measurements say                        |
+| `worker.capacity.targetCpuUsage`              | 0.8     | Admit while CPU is under this fraction of the pod's quota         |
+| `worker.capacity.targetMemoryUsage`           | 0.8     | Admit while memory is under this fraction of the pod's limit      |
+| `worker.capacity.minimumFreeDiskMegabytes`    | 1024    | Never go below this on the workspace volume                       |
+| `worker.capacity.reservedDiskPerRunMegabytes` | 512     | What a run in flight may still write                              |
+| `worker.cacheRetention`                       | 30 days | Evict cached providers and tool versions no run has used for this |
 
 **How many pods there are** is `worker.autoscaling`, on in a high-available install. `scaler: hpa` is a
 HorizontalPodAutoscaler on CPU and memory, which cannot see runs held back for memory or disk. `scaler: keda`
@@ -334,18 +334,18 @@ again.
 
 With `networkPolicy.create` (the default), every pod gets a policy that denies everything it does not list:
 
-| Pod          | Accepts from                                               | Reaches                                                     |
-|--------------|------------------------------------------------------------|-------------------------------------------------------------|
-| Identity     | ingress controller (8080); Worker (admin port)             | DNS, PostgreSQL, Redis, Temporal, SMTP or MailPit, GitHub   |
-| Orchestrator | ingress controller, Portal, Worker (8080)                  | DNS, PostgreSQL, Redis, Temporal, Identity's public origin  |
-| Portal       | ingress controller (8080)                                  | DNS, Redis, Orchestrator, Identity's public origin          |
-| Worker       | nothing                                                    | DNS, Temporal, Orchestrator, Identity admin, `workerEgress` |
-| Setup job    | nothing                                                    | DNS, the API server                                         |
-| PostgreSQL   | Identity, Orchestrator, Temporal                           | nothing                                                     |
-| Redis        | Identity, Orchestrator, Portal                             | nothing                                                     |
-| Temporal     | Identity, Orchestrator, Worker, Temporal UI, itself        | DNS, PostgreSQL, itself                                     |
-| Temporal UI  | ingress controller when published, `temporalWeb.from`      | DNS, Temporal                                               |
-| MailPit      | Identity (1025); ingress controller when published (8080)  | nothing                                                     |
+| Pod          | Accepts from                                              | Reaches                                                     |
+|--------------|-----------------------------------------------------------|-------------------------------------------------------------|
+| Identity     | ingress controller (8080); Worker (admin port)            | DNS, PostgreSQL, Redis, Temporal, SMTP or MailPit, GitHub   |
+| Orchestrator | ingress controller, Portal, Worker (8080)                 | DNS, PostgreSQL, Redis, Temporal, Identity's public origin  |
+| Portal       | ingress controller (8080)                                 | DNS, Redis, Orchestrator, Identity's public origin          |
+| Worker       | nothing                                                   | DNS, Temporal, Orchestrator, Identity admin, `workerEgress` |
+| Setup job    | nothing                                                   | DNS, the API server                                         |
+| PostgreSQL   | Identity, Orchestrator, Temporal                          | nothing                                                     |
+| Redis        | Identity, Orchestrator, Portal                            | nothing                                                     |
+| Temporal     | Identity, Orchestrator, Worker, Temporal UI, itself       | DNS, PostgreSQL, itself                                     |
+| Temporal UI  | ingress controller when published, `temporalWeb.from`     | DNS, Temporal                                               |
+| MailPit      | Identity (1025); ingress controller when published (8080) | nothing                                                     |
 
 Set `networkPolicy.ingressController` to where your ingress controller or Gateway runs, and `networkPolicy.dns`
 to your cluster DNS. The Worker reaches whatever its blueprints name — registries, git hosts, cloud APIs,
@@ -360,11 +360,11 @@ instances, and redis-ha has its own `networkPolicy` settings.
 Each of PostgreSQL, Redis and Temporal has a `mode` — `simple`, `high-available` or `external` — which
 follows `installMode` when empty. Only the block the mode names is read:
 
-| Dependency | `simple`                         | `high-available`                                    | `external`                     |
-|------------|----------------------------------|-----------------------------------------------------|--------------------------------|
-| PostgreSQL | `postgresql.simple`: StatefulSet | `postgresql.highAvailable`: CloudNativePG Cluster   | `postgresql.external`          |
-| Redis      | `redis.simple`: StatefulSet      | `redis-ha`: Sentinel, HAProxy in front              | `redis.external`               |
-| Temporal   | `temporal.simple`: auto-setup    | `temporal-ha`: Temporal's official chart            | `temporal.external`            |
+| Dependency | `simple`                         | `high-available`                                  | `external`            |
+|------------|----------------------------------|---------------------------------------------------|-----------------------|
+| PostgreSQL | `postgresql.simple`: StatefulSet | `postgresql.highAvailable`: CloudNativePG Cluster | `postgresql.external` |
+| Redis      | `redis.simple`: StatefulSet      | `redis-ha`: Sentinel, HAProxy in front            | `redis.external`      |
+| Temporal   | `temporal.simple`: auto-setup    | `temporal-ha`: Temporal's official chart          | `temporal.external`   |
 
 [`values-ha.yaml`](./values-ha.yaml) is a high-available install with all three. `redis-ha` and `temporal-ha`
 are upstream charts, dependencies in `Chart.yaml` fetched with `helm dependency build`, which installs exactly
@@ -413,11 +413,11 @@ source on import, so no data source names are assumed.
 
 They read what an OpenTelemetry pipeline produces when the services export to it (`global.otel.endpoint`):
 
-| Signal  | Expected in | What the queries rely on                                                                       |
-|---------|-------------|------------------------------------------------------------------------------------------------|
+| Signal  | Expected in | What the queries rely on                                                                                                                                                                       |
+|---------|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Metrics | Prometheus  | OTLP ingestion with `service.name`, `service.namespace` and the `k8s.*` names promoted to labels; the k8s attributes processor and the kubelet and cluster receivers for the Kubernetes panels |
-| Logs    | Loki 3      | OTLP ingestion, so `service_name` is a label and severity and `trace_id` are structured metadata |
-| Traces  | Tempo       | Its metrics generator writing the service graph and span metrics to the same Prometheus        |
+| Logs    | Loki 3      | OTLP ingestion, so `service_name` is a label and severity and `trace_id` are structured metadata                                                                                               |
+| Traces  | Tempo       | Its metrics generator writing the service graph and span metrics to the same Prometheus                                                                                                        |
 
 The getting-started app host runs exactly that pipeline; its `observability/` and `otel-agent.yaml` are a
 working configuration to copy.
@@ -450,16 +450,16 @@ Grafana is on 3000. `kubectl` is optional, for looking inside.
 aspire start          # from the repository root; the dashboard link is printed
 ```
 
-| Resource          | What it does                                                                                        |
-|-------------------|-----------------------------------------------------------------------------------------------------|
-| `k3s`             | The cluster. Persistent, with its data and node identity in volumes, so it survives `aspire stop`   |
-| `k3s-dns`         | Makes `postgres`, `redis`, `mailpit` and `otel-collector` resolvable from pods, adds the             |
-|                   | `*.dev.localhost` rewrite, restarts CoreDNS, then exits                                             |
-| `k3s-certificate` | Makes the developer certificate Traefik's default, and stores it in each release's namespace        |
-| `postgres`        | The services' and Temporal's PostgreSQL, with the `identity` and `orchestrator` databases           |
-| `redis`           | The Portal's and Identity's Redis                                                                   |
-| `mailpit`         | Where invitations, confirmations and password resets land                                           |
-| `otel-collector`  | Receives the services' telemetry, reads the cluster's metrics, scrapes Temporal's                   |
+| Resource          | What it does                                                                                          |
+|-------------------|-------------------------------------------------------------------------------------------------------|
+| `k3s`             | The cluster. Persistent, with its data and node identity in volumes, so it survives `aspire stop`     |
+| `k3s-dns`         | Makes `postgres`, `redis`, `mailpit` and `otel-collector` resolvable from pods, adds the              |
+|                   | `*.dev.localhost` rewrite, restarts CoreDNS, then exits                                               |
+| `k3s-certificate` | Makes the developer certificate Traefik's default, and stores it in each release's namespace          |
+| `postgres`        | The services' and Temporal's PostgreSQL, with the `identity` and `orchestrator` databases             |
+| `redis`           | The Portal's and Identity's Redis                                                                     |
+| `mailpit`         | Where invitations, confirmations and password resets land                                             |
+| `otel-collector`  | Receives the services' telemetry, reads the cluster's metrics, scrapes Temporal's                     |
 | `lembos`          | `helm upgrade --install` of this chart, then exits — every start applies the current chart and values |
 
 The first start takes several minutes, most of it pulling images. `lembos` finishes once every pod is
@@ -472,14 +472,14 @@ with the cluster and writes the addresses into the `coredns-custom` ConfigMap �
 
 ### Sign in
 
-| What        | Where                                           |
-|-------------|-------------------------------------------------|
-| Portal      | `https://portal.dev.localhost`                  |
-| Identity    | `https://identity.dev.localhost`                |
-| GraphQL     | `https://orchestrator.dev.localhost/graphql`    |
-| Temporal UI | `https://temporal.dev.localhost`                |
-| Grafana     | `http://localhost:3000`                         |
-| MailPit     | the `mailpit` resource in the dashboard         |
+| What        | Where                                        |
+|-------------|----------------------------------------------|
+| Portal      | `https://portal.dev.localhost`               |
+| Identity    | `https://identity.dev.localhost`             |
+| GraphQL     | `https://orchestrator.dev.localhost/graphql` |
+| Temporal UI | `https://temporal.dev.localhost`             |
+| Grafana     | `http://localhost:3000`                      |
+| MailPit     | the `mailpit` resource in the dashboard      |
 
 Sign in as `admin@lembos.local`, with the password the setup job generated:
 
@@ -498,11 +498,11 @@ with the cluster's kubeconfig, scrapes Temporal's server metrics through the `le
 store: traces to Tempo, logs to Loki, metrics to Prometheus. Grafana reads all three,
 linked to each other — an exemplar or a log line opens its trace, and a trace opens its logs.
 
-| Dashboard           | What it answers                                                                                         |
-|---------------------|---------------------------------------------------------------------------------------------------------|
+| Dashboard             | What it answers                                                                                                                                                                                                                  |
+|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Lembos — Platform** | Is the platform healthy? Request rate, errors and latency per service, workflow triggers and Temporal, pod CPU and memory, restarts, the Worker autoscaler, .NET runtime, logs by level, the service map, failed and slow traces |
-| **Lembos — Service**  | Where is one service spending its time? Rate, status and latency per route, its pods, its runtime, its logs and traces |
-| **Lembos — Temporal** | Is Temporal keeping up? Request rate and errors, persistence latency, task queue backlog and schedule-to-start latency, workflow outcomes |
+| **Lembos — Service**  | Where is one service spending its time? Rate, status and latency per route, its pods, its runtime, its logs and traces                                                                                                           |
+| **Lembos — Temporal** | Is Temporal keeping up? Request rate and errors, persistence latency, task queue backlog and schedule-to-start latency, workflow outcomes                                                                                        |
 
 The dashboards are the chart's own ([Grafana dashboards](#grafana-dashboards)), mounted from `dashboards/`;
 edit one in Grafana and export the JSON back there to keep the change. Metrics arrive every 60 seconds, so rates are taken
@@ -534,11 +534,11 @@ docker volume ls | grep -E 'lembos.deploy|lembos-deploy'   # the volumes left be
 
 ### When something is wrong
 
-| Symptom                                                | Look at                                                                       |
-|--------------------------------------------------------|-------------------------------------------------------------------------------|
-| `lembos` fails after ten minutes                       | `kubectl -n lembos get pods`, then the logs of whichever is not ready         |
-| A service cannot reach PostgreSQL or Redis             | The `k3s-dns` logs: each `<name> -> <address>` it wrote                       |
-| The install fails before anything starts               | `kubectl -n lembos logs job/lembos-setup` — the setup job's own report        |
-| Nothing answers on `*.dev.localhost`                   | Something else holds 80 or 443, so the `k3s` container could not publish them |
-| The browser warns about the certificate                | The developer certificate is not trusted yet: `aspire certs trust`            |
-| A dashboard panel says "No data"                       | Nothing has happened yet — no 5xx, no failed trace — or the first minutes     |
+| Symptom                                    | Look at                                                                       |
+|--------------------------------------------|-------------------------------------------------------------------------------|
+| `lembos` fails after ten minutes           | `kubectl -n lembos get pods`, then the logs of whichever is not ready         |
+| A service cannot reach PostgreSQL or Redis | The `k3s-dns` logs: each `<name> -> <address>` it wrote                       |
+| The install fails before anything starts   | `kubectl -n lembos logs job/lembos-setup` — the setup job's own report        |
+| Nothing answers on `*.dev.localhost`       | Something else holds 80 or 443, so the `k3s` container could not publish them |
+| The browser warns about the certificate    | The developer certificate is not trusted yet: `aspire certs trust`            |
+| A dashboard panel says "No data"           | Nothing has happened yet — no 5xx, no failed trace — or the first minutes     |

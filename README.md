@@ -28,11 +28,11 @@ through it: signing in, the dashboards, and what to look at when something is wr
 
 ## What is here
 
-| Path                                                                   | What                                                                                                                                                        |
-|------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [`aspire`](./aspire/Lembos.Deploy.AppHost)                             | The getting-started app host: k3s, this chart, its dependencies and an observability stack as Aspire resources                                         |
-| [`charts/lembos`](./charts/lembos)                                     | The Helm chart: the four services, a setup job that makes every Secret and key, and PostgreSQL, Redis and Temporal — simple, highly available or external   |
-| [`scripts/sync-platform-schema.sh`](./scripts/sync-platform-schema.sh) | Copies the platform's generated values contract into the chart's `values.schema.json`, at the release `appVersion` names                                    |
+| Path                                                                   | What                                                                                                                                                      |
+|------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`aspire`](./aspire/Lembos.Deploy.AppHost)                             | The getting-started app host: k3s, this chart, its dependencies and an observability stack as Aspire resources                                            |
+| [`charts/lembos`](./charts/lembos)                                     | The Helm chart: the four services, a setup job that makes every Secret and key, and PostgreSQL, Redis and Temporal — simple, highly available or external |
+| [`scripts/sync-platform-schema.sh`](./scripts/sync-platform-schema.sh) | Copies the platform's generated values contract into the chart's `values.schema.json`, at the release `appVersion` names                                  |
 
 The [chart's README](./charts/lembos/README.md) covers prerequisites, secrets, publishing, network policies,
 and the high-available options.
@@ -45,10 +45,10 @@ so every setup the chart supports is installed somewhere.
 
 The chart and the platform are released apart:
 
-| Version                       | Set by                                         | Names                                                            |
-|-------------------------------|------------------------------------------------|------------------------------------------------------------------|
-| The chart's `version`         | A `v*` tag in this repository                  | `oci://ghcr.io/lembosproj/charts/lembos`                         |
-| The chart's `appVersion`      | `Chart.yaml`, changed in a reviewed change     | `ghcr.io/lembosproj/platform/<component>`, published by platform |
+| Version                  | Set by                                     | Names                                                            |
+|--------------------------|--------------------------------------------|------------------------------------------------------------------|
+| The chart's `version`    | A `v*` tag in this repository              | `oci://ghcr.io/lembosproj/charts/lembos`                         |
+| The chart's `appVersion` | `Chart.yaml`, changed in a reviewed change | `ghcr.io/lembosproj/platform/<component>`, published by platform |
 
 So a chart fix ships without a platform release, and adopting a platform release is a one-line change to
 `appVersion`. The release workflow refuses to publish a chart whose `appVersion` has no published images.
