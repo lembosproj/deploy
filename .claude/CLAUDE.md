@@ -31,8 +31,8 @@ reproduce a failure.
 - **The chart follows the platform, never leads it.** The `platform` section of `values.yaml` mirrors the
   platform's `PlatformConfig`, and the setup job's Secrets mirror its `LocalSetupSpec`. Nothing checks either,
   so a change to one starts in the platform repository and is carried here by hand.
-- **`appVersion` names a published platform release.** Bump it to adopt one; the chart's own `version` comes
-  from the tag and is never edited.
+- **`appVersion` names a published platform release.** Bump it to adopt one; the chart's own `version` is
+  decided by semantic-release from the commit prefixes (`release.config.mjs`) and is never edited.
 - **A dependency moves in `Chart.yaml` and `Chart.lock` together** (`helm dependency update`), in one change.
 - **Comments say why**, as in the platform's `docs/code-conventions.md`; the chart's templates and values are
   the reference for density.

@@ -29,11 +29,13 @@
   </ItemGroup>
 
   <!--
-  Nothing here uses MessagePack. Aspire.Hosting 13.6.1 brings 2.5.302, which carries GHSA-qhrr-8q5h-9q3h and
-  fails the audit above; referencing the patched version lifts it. Drop this once Aspire depends on a fixed one.
+  This app host's code does not use MessagePack, but Aspire.Hosting does. 13.6.1 brings 2.5.302, which carries
+  GHSA-qhrr-8q5h-9q3h and fails the audit above; referencing the patched 2.x lifts it. Held on 2.x because Aspire
+  is built against it, so a 3.x major would break the app host at run time, which CI never sees: it only builds.
+  Drop this once Aspire depends on a fixed version itself.
   -->
   <ItemGroup>
-    <PackageReference Include="MessagePack" Version="3.1.12" />
+    <PackageReference Include="MessagePack" Version="2.5.307" />
   </ItemGroup>
 
 </Project>

@@ -47,11 +47,12 @@ The chart and the platform are released apart:
 
 | Version                  | Set by                                     | Names                                                            |
 |--------------------------|--------------------------------------------|------------------------------------------------------------------|
-| The chart's `version`    | A `v*` tag in this repository              | `oci://ghcr.io/lembosproj/charts/lembos`                         |
+| The chart's `version`    | Semantic release, from the commits on main | `oci://ghcr.io/lembosproj/charts/lembos`                         |
 | The chart's `appVersion` | `Chart.yaml`, changed in a reviewed change | `ghcr.io/lembosproj/platform/<component>`, published by platform |
 
 So a chart fix ships without a platform release, and adopting a platform release is a one-line change to
-`appVersion`. The release workflow refuses to publish a chart whose `appVersion` has no published images.
+`appVersion`. A `feat` or `fix` merged to main releases the chart; nobody pushes a tag. The release workflow
+refuses to publish a chart whose `appVersion` has no published images.
 
 ## Kept in step with the platform
 

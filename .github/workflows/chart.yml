@@ -1,10 +1,7 @@
 name: Chart
 
-# Pull requests and main validate the chart; a version tag (v1.2.3, v1.2.3-rc.1) publishes it and a GitHub
-# Release. The tag is the chart's version; the platform release it installs is Chart.yaml's appVersion, whose
-# images lembosproj/platform publishes — so cutting a chart never rebuilds an image:
-#
-#   git tag v0.2.0 && git push origin v0.2.0
+# Pull requests and main validate the chart and build the app host. A pass on main is what release.yml waits
+# for: it decides from the commits whether there is a chart to publish, and publishes it.
 on:
   pull_request:
     branches:
@@ -15,11 +12,11 @@ on:
       - "global.json"
       - "nuget.config"
       - ".github/workflows/chart.yml"
+      - ".github/workflows/release.yml"
+      - "release.config.mjs"
   push:
     branches:
       - main
-    tags:
-      - "v[0-9]+.[0-9]+.[0-9]+*"
 
 permissions:
   contents: read
@@ -98,68 +95,30 @@ jobs:
       - name: Build
         run: dotnet build Lembos.Deploy.slnx
 
-  release:
-    name: Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [validate]
+  # Dependabot's minor and patch updates merge themselves once the chart validates and the app host builds.
+  # Majors wait for a person: they are the kind that needs reading. Merging here, after both jobs, rather than
+  # with GitHub's auto-merge, means nothing merges unvalidated even if no branch rule requires the checks. An
+  # update to a file this workflow does not watch — the markdownlint or CLA workflows — never gets here, and
+  # waits for a person too.
+  dependabot:
+    name: Merge Dependabot update
+    needs: [validate, apphost]
+    if: github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]'
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     permissions:
       contents: write
-      packages: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
-      - id: versions
-        run: |
-          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          echo "app=$(yq '.appVersion' charts/lembos/Chart.yaml)" >> "$GITHUB_OUTPUT"
-      # The chart names these by default; publishing it before they exist would publish a chart that cannot
-      # pull what it installs. Anonymous on purpose: a cluster pulls them without credentials too.
-      - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4 # v2.0.2
-      - name: Platform images and contract exist
+      - id: update
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      # A chore merged with GITHUB_TOKEN starts no push workflow, so main is not revalidated and nothing is
+      # released — which is right for a chore, and the next merge a person makes validates main again.
+      - name: Merge
+        if: steps.update.outputs.update-type != 'version-update:semver-major'
+        run: gh pr merge --squash "$PR_URL"
         env:
-          APP_VERSION: ${{ steps.versions.outputs.app }}
-        run: |
-          for image in identity orchestrator portal worker setup; do
-            docker manifest inspect "ghcr.io/${{ github.repository_owner }}/platform/$image:$APP_VERSION" > /dev/null \
-              || { echo "::error::ghcr.io/${{ github.repository_owner }}/platform/$image:$APP_VERSION is not published, or not public."; exit 1; }
-          done
-          # And the contract this chart's platform section was copied from: a chart released against a
-          # platform that published none cannot have been compared, so it is not released.
-          oras manifest fetch --descriptor "ghcr.io/${{ github.repository_owner }}/platform/values-schema:$APP_VERSION" > /dev/null \
-            || { echo "::error::ghcr.io/${{ github.repository_owner }}/platform/values-schema:$APP_VERSION is not published, or not public."; exit 1; }
-      # The tag decides the chart's version, so Chart.yaml's version never has to be bumped to cut one.
-      - name: Package the chart
-        run: |
-          helm repo add dandydeveloper https://dandydeveloper.github.io/charts
-          helm repo add temporal https://go.temporal.io/helm-charts
-          helm dependency build charts/lembos
-          helm package charts/lembos --version "${{ steps.versions.outputs.version }}" --destination dist
-      # OCI in GHCR, beside the images: helm install oci://ghcr.io/<owner>/charts/lembos --version <version>
-      - name: Push the chart to GHCR
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
-          helm push "dist/lembos-${{ steps.versions.outputs.version }}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
-      # A suffixed tag (v1.2.0-rc.1) is a pre-release, so "latest" only ever points at a finished milestone.
-      - name: Create the GitHub Release
-        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.versions.outputs.version }}
-          APP_VERSION: ${{ steps.versions.outputs.app }}
-        run: |
-          prerelease=()
-          [[ "$VERSION" == *-* ]] && prerelease=(--prerelease)
-          owner="${{ github.repository_owner }}"
-          cat > notes.md <<NOTES
-          ## Install
-
-          \`\`\`shell
-          helm upgrade --install lembos oci://ghcr.io/${owner}/charts/lembos --version ${VERSION} \\
-            --namespace lembos --create-namespace --set global.domain=<your domain>
-          \`\`\`
-
-          Installs Lembos ${APP_VERSION}: \`ghcr.io/${owner}/platform/{identity,orchestrator,portal,worker,setup}:${APP_VERSION}\`
-          NOTES
-          gh release create "$GITHUB_REF_NAME" "dist/lembos-${VERSION}.tgz" \
-            --title "Lembos chart ${VERSION}" --notes-file notes.md --generate-notes --verify-tag "${prerelease[@]}"

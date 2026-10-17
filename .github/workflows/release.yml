@@ -1,0 +1,123 @@
+name: Release
+
+# A chart release is cut from main by semantic release, not by a tag somebody pushes: every commit on main that
+# has passed the Chart workflow is a candidate, the conventional commit prefixes since the last tag decide
+# whether there is a release and what number it gets (release.config.mjs), and the chart is pushed under that
+# number before the tag and the GitHub release exist — so a release never names a chart that is not there.
+#
+# One run does all of it rather than handing a tag to another workflow: a tag pushed with GITHUB_TOKEN starts
+# no workflow, so a release job waiting for one would never run.
+on:
+  workflow_run:
+    workflows: ["Chart"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One release at a time, in order: two overlapping runs would compute the same version from the same commits
+# and race each other to the tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  # Bumped deliberately, together: semantic-release and its exec plugin are not in a package.json for
+  # Dependabot to see.
+  SEMANTIC_RELEASE: semantic-release@25.0.9
+  SEMANTIC_RELEASE_EXEC: "@semantic-release/exec@7.1.0"
+
+jobs:
+  release:
+    name: Release
+    # A push to main, not a pull request whose branch happens to be called main.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The whole history: the version is computed from every commit since the last tag.
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - id: app
+        run: echo "version=$(yq '.appVersion' charts/lembos/Chart.yaml)" >> "$GITHUB_OUTPUT"
+
+      # What the next version would be, without tagging anything. A dry run still verifies the token and the
+      # branch, analyses the commits and generates the notes; only the tag and the release are skipped.
+      - id: next
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION: ${{ steps.app.outputs.version }}
+        run: npx --yes -p "$SEMANTIC_RELEASE" -p "$SEMANTIC_RELEASE_EXEC" semantic-release --dry-run
+
+      # The chart names these by default; publishing it before they exist would publish a chart that cannot
+      # pull what it installs. Anonymous on purpose: a cluster pulls them without credentials too.
+      - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4 # v2.0.2
+        if: steps.next.outputs.version != ''
+      - name: Platform images and contract exist
+        if: steps.next.outputs.version != ''
+        env:
+          APP_VERSION: ${{ steps.app.outputs.version }}
+        run: |
+          for image in identity orchestrator portal worker setup; do
+            docker manifest inspect "ghcr.io/${{ github.repository_owner }}/platform/$image:$APP_VERSION" > /dev/null \
+              || { echo "::error::ghcr.io/${{ github.repository_owner }}/platform/$image:$APP_VERSION is not published, or not public."; exit 1; }
+          done
+          # And the contract this chart's platform section was copied from: a chart released against a
+          # platform that published none cannot have been compared, so it is not released.
+          oras manifest fetch --descriptor "ghcr.io/${{ github.repository_owner }}/platform/values-schema:$APP_VERSION" > /dev/null \
+            || { echo "::error::ghcr.io/${{ github.repository_owner }}/platform/values-schema:$APP_VERSION is not published, or not public."; exit 1; }
+
+      # The release decides the chart's version, so Chart.yaml's version never has to be bumped to cut one.
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+        if: steps.next.outputs.version != ''
+      - name: Package the chart
+        if: steps.next.outputs.version != ''
+        run: |
+          helm repo add dandydeveloper https://dandydeveloper.github.io/charts
+          helm repo add temporal https://go.temporal.io/helm-charts
+          helm dependency build charts/lembos
+          helm package charts/lembos --version "${{ steps.next.outputs.version }}" --destination dist
+
+      # OCI in GHCR, beside the images: helm install oci://ghcr.io/<owner>/charts/lembos --version <version>
+      - name: Push the chart to GHCR
+        if: steps.next.outputs.version != ''
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/lembos-${{ steps.next.outputs.version }}.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+      # Only after the chart is pushed: the tag, and the GitHub release with the install notes, the generated
+      # notes and the packaged chart. The same computation as the dry run, on the same commits, so it arrives
+      # at the same number; a main that moved in between fails here with "behind the remote", and the next run
+      # releases the newer commit, overwriting the same chart version with its own.
+      - name: Tag and release
+        if: steps.next.outputs.version != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APP_VERSION: ${{ steps.app.outputs.version }}
+        run: npx --yes -p "$SEMANTIC_RELEASE" -p "$SEMANTIC_RELEASE_EXEC" semantic-release
+
+      # lembos.dev reads its install commands' versions from this repository's latest release when it builds,
+      # so a release redeploys it. GITHUB_TOKEN cannot start a workflow in another repository: this needs
+      # LEMBOS_DEV_DEPLOY_TOKEN, a fine-grained token with Actions read and write on lembosproj/lembos.dev. Without
+      # it the site still picks the release up on its daily rebuild.
+      - name: Redeploy lembos.dev
+        if: steps.next.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.LEMBOS_DEV_DEPLOY_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::LEMBOS_DEV_DEPLOY_TOKEN is not set; lembos.dev shows this release after its daily rebuild."
+            exit 0
+          fi
+          gh workflow run deploy.yml --repo lembosproj/lembos.dev --ref main

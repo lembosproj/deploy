@@ -137,17 +137,20 @@ values; the regular expression is what stops an image signed by another reposito
 
 ## Releases
 
-The chart and the platform are versioned apart. `version` is the chart's own and comes from this
-repository's tag; `appVersion` in `Chart.yaml` is the platform release it installs, and moves only when a
-change here adopts a new one. A version tag publishes the chart:
+The chart and the platform are versioned apart. `version` is the chart's own and is decided at release;
+`appVersion` in `Chart.yaml` is the platform release it installs, and moves only when a change here adopts a
+new one.
 
-```shell
-git tag v0.2.0 && git push origin v0.2.0      # v0.2.0-rc.1 publishes a pre-release
-```
+Nobody tags a release. Once the `Chart` workflow passes on `main`, the `Release` workflow asks
+[semantic-release](https://semantic-release.gitbook.io) whether the commits since the last tag call for one —
+`feat` is a minor, `fix` and `perf` a patch, `BREAKING CHANGE` a major, and `chore` or `docs` nothing — and
+under what number (`release.config.mjs`). When there is one, it checks that all five images and the platform
+contract exist at `appVersion` — a chart naming an image that is not there installs nothing — packages the
+chart under that number, pushes it to `oci://ghcr.io/<owner>/charts/lembos`, and only then tags the commit
+and creates a GitHub Release with install notes, notes generated from the commits, and the chart attached.
 
-The `Chart` workflow then checks that all five images exist at `appVersion` — a chart naming an image that
-is not there installs nothing — packages the chart, pushes it to `oci://ghcr.io/<owner>/charts/lembos`, and
-creates a GitHub Release with the chart attached and notes generated from the merged pull requests.
+So adopting a platform release is committed as the `fix` or `feat` it is for an installer, and a Dependabot
+bump, which is a `chore`, never cuts a chart.
 
 New GHCR packages start private; make the chart public once, in its package settings, for clusters that
 pull without credentials.
@@ -399,7 +402,8 @@ chart fails at render time naming each value to change and what to change it to.
 ## Grafana dashboards
 
 [`dashboards/`](./dashboards) holds the platform's Grafana dashboards — **Lembos — Platform** for the whole
-install, **Lembos — Service** for one service — and the chart can ship them:
+install, **Lembos — Service** for one service, **Lembos — Temporal** for the bundled Temporal server
+(`temporal.simple.metrics`) — and the chart can ship them:
 
 ```yaml
 grafanaDashboards:

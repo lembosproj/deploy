@@ -1,4 +1,9 @@
 version: 2
+
+# Every update is a chore, as the pull request template asks, so none cuts a chart release by itself
+# (release.config.mjs). Minor and patch releases come grouped, one pull request a week per ecosystem, and merge
+# themselves once the Chart workflow passes; a major comes alone and waits for a person. Grouped rather than
+# ignored: `ignore` applies to security updates too.
 updates:
   # Pinned to a commit, with the release it was beside it: a tag can be moved to point at anything, a commit
   # cannot. Dependabot moves the commit and rewrites the comment together.
@@ -6,14 +11,33 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    commit-message:
+      prefix: chore
+    groups:
+      MinorAndPatch:
+        update-types:
+          - minor
+          - patch
 
   # The getting-started app host. The Aspire packages move together, and with the platform's own app host.
   - package-ecosystem: nuget
     directory: "/aspire/Lembos.Deploy.AppHost"
     schedule:
       interval: weekly
+    commit-message:
+      prefix: chore
     groups:
+      MinorAndPatch:
+        update-types:
+          - minor
+          - patch
       Aspire:
         patterns:
           - "Aspire.*"
           - "CommunityToolkit.Aspire.*"
+    ignore:
+      # Pinned only to lift Aspire's vulnerable 2.5.302 to the patched 2.x line. Aspire is built against 2.x, so
+      # a 3.x major would break it; drop the pin once Aspire depends on a fixed version.
+      - dependency-name: MessagePack
+        update-types:
+          - version-update:semver-major
