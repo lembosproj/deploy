@@ -61,7 +61,11 @@ var cluster = builder.AddK3sCluster("k3s", apiServerPort: 16443)
         @"rewrite name regex (.*\.)?dev\.localhost\.? traefik.kube-system.svc.cluster.local. answer auto")
     // Traefik serves the developer certificate, and the release's namespace gets it as the TLS Secret
     // aspire-developer-certificate, which values.aspire.yaml has the services trust.
-    .WithIngressDeveloperCertificate();
+    .WithIngressDeveloperCertificate()
+    .WithUrl($"https://portal.{domain}", "Portal")
+    .WithUrl($"https://identity.{domain}", "Identity")
+    .WithUrl($"https://orchestrator.{domain}/graphql", "GraphQL")
+    .WithUrl($"https://temporal.{domain}", "Temporal UI");
 
 // ── Observability, outside the cluster ──
 //
@@ -142,10 +146,6 @@ cluster
 cluster.AddHelmRelease("lembos", chartDirectory, @namespace: "lembos")
     .WithHelmValuesFile("values.aspire.yaml")
     .WithHelmValue("postgresql.external.password", postgresPassword)
-    .WithHelmValue("redis.external.password", redisPassword)
-    .WithUrl($"https://portal.{domain}", "Portal")
-    .WithUrl($"https://identity.{domain}", "Identity")
-    .WithUrl($"https://orchestrator.{domain}/graphql", "GraphQL")
-    .WithUrl($"https://temporal.{domain}", "Temporal UI");
+    .WithHelmValue("redis.external.password", redisPassword);
 
 builder.Build().Run();
