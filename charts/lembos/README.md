@@ -129,7 +129,7 @@ can be moved after signing and a signature over a digest cannot:
 cosign verify \
   --certificate-identity-regexp '^https://github.com/lembosproj/platform/\.github/workflows/release\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/lembosproj/platform/orchestrator:0.1.0
+  ghcr.io/lembosproj/platform/orchestrator:0.1.1
 ```
 
 An admission controller that checks signatures (Kyverno, Sigstore's policy controller) takes the same two
