@@ -16,6 +16,7 @@ spec:
   ingress: []
   egress:
     {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.otelEgress" . | nindent 4 }}
     {{- include "lembos.temporalEgress" . | nindent 4 }}
     - to:
         {{- include "lembos.peer" (dict "root" . "component" "orchestrator") | nindent 8 }}

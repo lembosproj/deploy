@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/aspire/">
+    <Project Path="aspire/Lembos.Deploy.AppHost/Lembos.Deploy.AppHost.csproj" />
+  </Folder>
+</Solution>

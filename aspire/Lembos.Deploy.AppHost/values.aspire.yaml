@@ -1,0 +1,120 @@
+# Lembos on the app host's k3s, shaped like the platform's own `aspire start`: one pod per component, Temporal in
+# the release, and PostgreSQL, Redis and MailPit beside the cluster as Aspire resources. Traefik — k3s's own
+# ingress controller — is in front, serving the developer certificate, and k3s's built-in NetworkPolicy
+# controller enforces the policies. The services export their telemetry to the app host's collector.
+
+installMode: simple
+
+global:
+  # The developer certificate carries *.dev.localhost, and the machine trusts it; *.localhost resolves to the
+  # loopback address, where the app host publishes Traefik on 80 and 443.
+  domain: dev.localhost
+  # Traefik's pods are on k3s's default cluster CIDR.
+  forwardedHeaders:
+    knownNetworks: ["10.42.0.0/16"]
+  # The services call Identity through Traefik, which serves the developer certificate; it is self-signed,
+  # so they trust it as it is. The k3s integration writes the Secret (WithIngressDeveloperCertificate).
+  trustedCertificates:
+    secretName: aspire-developer-certificate
+    keys: [tls.crt]
+  # The app host's collector, a host alias. The services name their own pod, Deployment and node.
+  otel:
+    endpoint: http://otel-collector:4317
+    protocol: grpc
+
+ingress:
+  className: traefik
+  tls:
+    enabled: true
+    secretName: aspire-developer-certificate
+
+networkPolicy:
+  create: true
+  # Traefik runs in kube-system on k3s.
+  ingressController:
+    namespaceSelector:
+      matchLabels:
+        kubernetes.io/metadata.name: kube-system
+    podSelector:
+      matchLabels:
+        app.kubernetes.io/name: traefik
+
+# Small requests: a laptop shares its CPU and memory with everything else the app host runs.
+identity:
+  resources:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {memory: 512Mi}
+  smtp:
+    endpoint: smtp://mailpit:1025
+    port: 1025
+
+orchestrator:
+  resources:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {memory: 768Mi}
+
+portal:
+  resources:
+    requests: {cpu: 50m, memory: 192Mi}
+    limits: {memory: 768Mi}
+
+worker:
+  # One run at a time per pod, and from one to three pods scaled on CPU by k3s's metrics server:
+  # `kubectl -n lembos get hpa -w` while a release runs.
+  maxConcurrentRuns: 1
+  autoscaling:
+    enabled: true
+    scaler: hpa
+    minReplicas: 1
+    maxReplicas: 3
+  persistence:
+    size: 5Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1536Mi}
+
+# Every host below is a host alias the app host gives the cluster's DNS: the Aspire container of that name, on
+# its container port.
+postgresql:
+  mode: external
+  external:
+    host: postgres
+    port: 5432
+    username: postgres
+    # The password is the app host's postgres-password parameter, set with --set.
+    sslMode: Disable
+
+redis:
+  mode: external
+  external:
+    host: redis
+    port: 6379
+    # The password is the app host's redis-password parameter, set with --set.
+    tls: false
+
+# Temporal in the release, against the PostgreSQL beside the cluster: it creates its own two databases there.
+temporal:
+  mode: simple
+  simple:
+    # Scraped by the app host's collector at k3s:8000 — the service load balancer publishes the Service on the
+    # node, which is on the collector's network. The scrape arrives through the node, so from anywhere.
+    metrics:
+      enabled: true
+      service:
+        type: LoadBalancer
+      from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+  # temporal.dev.localhost: the chart's own UI. It has no authentication of its own; fine on a laptop, an
+  # internal ingress class anywhere else.
+  ui:
+    ingress:
+      enabled: true
+
+# The app host's MailPit catches the mail instead.
+mailpit:
+  enabled: false
+
+# The cluster owns the coredns-custom ConfigMap: the app host adds the *.dev.localhost rewrite to it beside the
+# host aliases.
+extraObjects: []

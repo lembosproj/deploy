@@ -19,6 +19,7 @@ spec:
         - {protocol: TCP, port: 8080}
   egress:
     {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.otelEgress" . | nindent 4 }}
     {{- include "lembos.redisEgress" . | nindent 4 }}
     - to:
         {{- include "lembos.peer" (dict "root" . "component" "orchestrator") | nindent 8 }}

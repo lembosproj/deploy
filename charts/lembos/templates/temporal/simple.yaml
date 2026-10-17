@@ -34,6 +34,29 @@ spec:
     - name: grpc
       port: 7233
       targetPort: grpc
+{{- if $values.metrics.enabled }}
+---
+# A Service of its own, so its type can let a scraper beyond the cluster in without publishing the frontend.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+  {{- with $values.metrics.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ $values.metrics.service.type }}
+  selector:
+    {{- include "lembos.selectorLabels" $ctx | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ $values.metrics.port }}
+      targetPort: metrics
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -82,6 +105,10 @@ spec:
           ports:
             - name: grpc
               containerPort: 7233
+            {{- if $values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ $values.metrics.port }}
+            {{- end }}
           env:
             - name: POD_IP
               valueFrom:
@@ -132,6 +159,10 @@ spec:
               value: {{ $values.retention | quote }}
             - name: DYNAMIC_CONFIG_FILE_PATH
               value: /etc/temporal/config/dynamicconfig/dynamic-config.yaml
+            {{- if $values.metrics.enabled }}
+            - name: PROMETHEUS_ENDPOINT
+              value: {{ printf "0.0.0.0:%v" $values.metrics.port | quote }}
+            {{- end }}
           # Ready once `default` can be described, not once the port opens: the port is open well before the
           # namespace exists, and a Worker that starts in that window exits — the same reason the app host's
           # health check asks this question.
@@ -185,6 +216,13 @@ spec:
     # Itself, on its broadcast address: the services inside the one process still talk over the ring.
     - from:
         {{- include "lembos.peer" $ctx | nindent 8 }}
+    {{- if and $values.metrics.enabled $values.metrics.from }}
+    # Whoever scrapes the metrics.
+    - from:
+        {{- toYaml $values.metrics.from | nindent 8 }}
+      ports:
+        - {protocol: TCP, port: {{ $values.metrics.port }}}
+    {{- end }}
   egress:
     {{- include "lembos.dnsEgress" . | nindent 4 }}
     {{- include "lembos.postgresqlEgress" . | nindent 4 }}

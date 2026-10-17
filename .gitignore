@@ -13,3 +13,8 @@ dist/
 .idea/
 .vscode/
 node_modules/
+
+# .NET build output, and the app host's kubeconfigs for the local cluster (credentials).
+bin/
+obj/
+.k3s/
