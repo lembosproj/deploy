@@ -36,6 +36,10 @@ global:
   # -- The scheme browsers use. Leave https: Identity refuses OpenID Connect requests that did not arrive
   # over HTTPS, so TLS has to terminate at the ingress or gateway in front of it.
   publicScheme: https
+  # -- The port browsers use, when it is not the scheme's default — an ingress published on 8433 on a laptop,
+  # say. Every origin the chart derives carries it: the OIDC issuer, redirect URIs, CORS origins, and the
+  # address the services call Identity at, so the ingress has to answer on it from inside the cluster too.
+  publicPort: ~
   # -- ASPNETCORE_ENVIRONMENT for every service. Anything but Development makes the key-protection
   # certificates and the signing key required, which is the point.
   environment: Production
@@ -660,6 +664,17 @@ temporal:
       pullPolicy: IfNotPresent
     # -- How long a closed workflow's history is kept in the `default` namespace.
     retention: 72h
+    # -- The server's Prometheus metrics: request and persistence latency, task queue backlog, workflow
+    # outcomes. Off unless something scrapes them.
+    metrics:
+      enabled: false
+      port: 8000
+      # -- How a scraper reaches them: ClusterIP for one in the cluster, a LoadBalancer for one beyond it.
+      service:
+        type: ClusterIP
+        annotations: {}
+      # -- Who may scrape them, as NetworkPolicy peers — a monitoring namespace, say. Empty admits nobody.
+      from: []
     # -- Temporal's dynamic configuration, in its own file format. Every flag defaults to off in the server,
     # so this is what is on — see src/AppHost/Lembos.AppHost/dynamicconfig/development.yaml.
     dynamicConfig:
@@ -780,6 +795,22 @@ mailpit:
     # -- Default: mail.<global.domain>.
     host: ""
     annotations: {}
+
+# -- The platform's Grafana dashboards, from the chart's dashboards/ directory, as ConfigMaps Grafana's dashboard
+# sidecar loads — the one kube-prometheus-stack and the Grafana chart run. They expect what an OpenTelemetry
+# pipeline produces: metrics in Prometheus over OTLP with the resource attributes promoted to labels, logs in
+# Loki 3 over OTLP, traces in Tempo. The chart README lists what each needs. Off unless asked for: without a
+# sidecar they are inert ConfigMaps, and the JSON imports into any Grafana as it is.
+grafanaDashboards:
+  enabled: false
+  # -- Where the sidecar looks, when not the release's namespace.
+  namespace: ""
+  # -- The label the sidecar selects on — grafana_dashboard: "1" is its default.
+  labels:
+    grafana_dashboard: "1"
+  # -- The folder the sidecar files them under, for a sidecar that reads folder annotations.
+  annotations:
+    grafana_folder: Lembos
 
 # -- Extra manifests rendered with the release. Strings are rendered as templates.
 extraObjects: []

@@ -1,0 +1,27 @@
+{{- /*
+The platform's Grafana dashboards (dashboards/*.json), one ConfigMap each, for Grafana's dashboard sidecar —
+the one kube-prometheus-stack and the Grafana chart run — to find by its label.
+*/ -}}
+{{- if .Values.grafanaDashboards.enabled }}
+{{- range $path, $_ := .Files.Glob "dashboards/*.json" }}
+{{- $ctx := dict "root" $ "component" "dashboards" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lembos.componentName" $ctx }}-{{ base $path | trimSuffix ".json" | trimPrefix "lembos-" }}
+  namespace: {{ $.Values.grafanaDashboards.namespace | default $.Release.Namespace }}
+  labels:
+    {{- include "lembos.labels" $ctx | nindent 4 }}
+    {{- with $.Values.grafanaDashboards.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- with $.Values.grafanaDashboards.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  {{ base $path }}: |-
+    {{- $.Files.Get $path | nindent 4 }}
+{{- end }}
+{{- end }}

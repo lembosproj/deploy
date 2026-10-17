@@ -119,11 +119,11 @@
     "global": {
       "type": "object",
       "properties": {
-        "environment": {
+        "clusterDomain": {
           "type": "string",
           "minLength": 1
         },
-        "clusterDomain": {
+        "environment": {
           "type": "string",
           "minLength": 1
         },
@@ -149,6 +149,15 @@
               "type": "boolean"
             }
           }
+        },
+        "publicPort": {
+          "description": "The port browsers use, when it is not the scheme's default.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 65535
         }
       }
     }

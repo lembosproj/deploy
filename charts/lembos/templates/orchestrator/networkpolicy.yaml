@@ -22,6 +22,7 @@ spec:
         - {protocol: TCP, port: 8080}
   egress:
     {{- include "lembos.dnsEgress" . | nindent 4 }}
+    {{- include "lembos.otelEgress" . | nindent 4 }}
     {{- include "lembos.postgresqlEgress" . | nindent 4 }}
     {{- include "lembos.redisEgress" . | nindent 4 }}
     {{- include "lembos.temporalEgress" . | nindent 4 }}

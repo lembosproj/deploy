@@ -83,7 +83,12 @@ imagePullSecrets:
 
 {{/* The origin browsers and the other services address a component by. */}}
 {{- define "lembos.origin" -}}
-{{- printf "%s://%s" .root.Values.global.publicScheme (include "lembos.host" .) -}}
+{{- printf "%s://%s%s" .root.Values.global.publicScheme (include "lembos.host" .) (include "lembos.publicPortSuffix" .root) -}}
+{{- end -}}
+
+{{/* ":<global.publicPort>", or nothing when browsers use the scheme's default port. */}}
+{{- define "lembos.publicPortSuffix" -}}
+{{- with .Values.global.publicPort }}:{{ . }}{{ end -}}
 {{- end -}}
 
 {{/* The names one Service answers to from inside the cluster, in the form AllowedHosts takes. {root, name} */}}
@@ -434,8 +439,16 @@ variables, which are read before any settings file is.
   value: {{ .root.Values.global.environment | quote }}
 - name: OTEL_SERVICE_NAME
   value: {{ .component | quote }}
+# The pod's own Kubernetes identity on every signal, as an in-cluster collector's k8sattributes processor would
+# add it — so telemetry can go straight to a collector anywhere and still say which pod sent it.
+- name: K8S_POD_NAME
+  valueFrom:
+    fieldRef: {fieldPath: metadata.name}
+- name: K8S_NODE_NAME
+  valueFrom:
+    fieldRef: {fieldPath: spec.nodeName}
 - name: OTEL_RESOURCE_ATTRIBUTES
-  value: {{ printf "service.namespace=lembos,deployment.environment=%s" .root.Values.global.environment | quote }}
+  value: {{ printf "service.namespace=lembos,deployment.environment=%s,service.instance.id=$(K8S_POD_NAME),k8s.namespace.name=%s,k8s.deployment.name=%s,k8s.pod.name=$(K8S_POD_NAME),k8s.container.name=%s,k8s.node.name=$(K8S_NODE_NAME)" .root.Values.global.environment .root.Release.Namespace (include "lembos.componentName" .) .component | quote }}
 {{- with .root.Values.global.otel }}
 {{- if .endpoint }}
 - name: OTEL_EXPORTER_OTLP_ENDPOINT
@@ -674,6 +687,15 @@ request tokens: it is the issuer they validate, so they cannot be pointed at the
 on the CNI that traffic is seen addressed to the ingress controller's pods or to its load balancer, so both
 are allowed.
 */}}
+{{- define "lembos.otelEgress" -}}
+{{- with .Values.global.otel.endpoint }}
+{{- $port := regexFind ":[0-9]+$" (urlParse .).host | trimPrefix ":" | default (ternary "4317" "4318" (eq $.Values.global.otel.protocol "grpc")) }}
+# Telemetry, on the OTLP endpoint's port wherever it resolves: a collector in the cluster or beyond it.
+- ports:
+    - {protocol: TCP, port: {{ $port }}}
+{{- end }}
+{{- end -}}
+
 {{- define "lembos.publicOriginEgress" -}}
 - to:
     {{- include "lembos.ingressControllerPeer" . | nindent 4 }}

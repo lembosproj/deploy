@@ -1,0 +1,39 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.6.1">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>lembos-deploy-apphost</UserSecretsId>
+    <AspireUseCliBundle>false</AspireUseCliBundle>
+    <!-- ASPIRECERTIFICATES001: WithoutHttpsCertificate, which keeps Redis on plain TCP, is still marked for evaluation. -->
+    <NoWarn>$(NoWarn);ASPIRE010;ASPIRECERTIFICATES001</NoWarn>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <NuGetAuditLevel>moderate</NuGetAuditLevel>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+    CommunityToolkit.Aspire.Hosting.K3s with what this app host uses — host aliases, CoreDNS customizations,
+    enabled components, the ingress developer certificate, chart directories, Helm values from parameters —
+    built from the pull request that adds them. Back to the CommunityToolkit package once a release carries it;
+    the assembly and namespaces are the same.
+    -->
+    <PackageReference Include="Lab.Aspire.Hosting.K3s" Version="13.6.1-lab.1" />
+    <PackageReference Include="CommunityToolkit.Aspire.Hosting.MailPit" Version="13.6.0" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.6.1" />
+    <PackageReference Include="Aspire.Hosting.Redis" Version="13.6.1" />
+  </ItemGroup>
+
+  <!--
+  Nothing here uses MessagePack. Aspire.Hosting 13.6.1 brings 2.5.302, which carries GHSA-qhrr-8q5h-9q3h and
+  fails the audit above; referencing the patched version lifts it. Drop this once Aspire depends on a fixed one.
+  -->
+  <ItemGroup>
+    <PackageReference Include="MessagePack" Version="2.5.307" />
+  </ItemGroup>
+
+</Project>

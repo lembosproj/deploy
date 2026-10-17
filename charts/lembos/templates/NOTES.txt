@@ -6,9 +6,9 @@ Published at:
   Orchestrator  {{ include "lembos.origin" (dict "root" . "component" "orchestrator") }}/graphql
 {{- range include "lembos.routes" . | fromJsonArray }}
 {{- if eq .component "temporal-ui" }}
-  Temporal UI   {{ $.Values.global.publicScheme }}://{{ .host }}   (no authentication of its own)
+  Temporal UI   {{ $.Values.global.publicScheme }}://{{ .host }}{{ include "lembos.publicPortSuffix" $ }}   (no authentication of its own)
 {{- else if eq .component "mailpit" }}
-  Mail          {{ $.Values.global.publicScheme }}://{{ .host }}   (every message Identity sends)
+  Mail          {{ $.Values.global.publicScheme }}://{{ .host }}{{ include "lembos.publicPortSuffix" $ }}   (every message Identity sends)
 {{- end }}
 {{- end }}
 {{- if and .Values.temporal.ui.enabled (not .Values.temporal.ui.ingress.enabled) }}

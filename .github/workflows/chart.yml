@@ -11,6 +11,9 @@ on:
       - main
     paths:
       - "charts/**"
+      - "aspire/**"
+      - "global.json"
+      - "nuget.config"
       - ".github/workflows/chart.yml"
   push:
     branches:
@@ -47,10 +50,12 @@ jobs:
         run: |
           go install github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0
           helm lint charts/lembos -f charts/lembos/ci/default-values.yaml
-          for values in charts/lembos/values-k3s.yaml charts/lembos/values-ha.yaml charts/lembos/ci/*.yaml; do
+          for values in charts/lembos/values-ha.yaml charts/lembos/ci/*.yaml aspire/Lembos.Deploy.AppHost/values.aspire.yaml; do
             echo "::group::$values"
             relay=()
             [[ "$values" == *values-ha.yaml ]] && relay=(--set-string identity.smtp.endpoint=smtp://relay.example.org:25 --set 'global.forwardedHeaders.knownNetworks={10.244.0.0/16}')
+            # The app host sets the PostgreSQL and Redis passwords from parameters.
+            [[ "$values" == *values.aspire.yaml ]] && relay=(--set-string postgresql.external.password=rendered-by-ci --set-string redis.external.password=rendered-by-ci)
             helm template lembos charts/lembos --namespace lembos -f "$values" "${relay[@]}" \
               --api-versions postgresql.cnpg.io/v1/Cluster --api-versions postgresql.cnpg.io/v1/Database \
               --api-versions gateway.networking.k8s.io/v1/HTTPRoute \
@@ -78,6 +83,20 @@ jobs:
           fi
           diff <(jq -S .properties.platform charts/lembos/values.schema.json) <(jq -S . platform-contract/platform-values.schema.json) \
             || { echo "::error::values.schema.json's platform section differs from the platform contract at ${version}. Run scripts/sync-platform-schema.sh and commit the result."; exit 1; }
+
+  # Built, not run: a run needs privileged containers and pulls every image, which is a laptop's job. This
+  # keeps the getting-started path compiling — warnings, including the NuGet audit, are errors.
+  apphost:
+    name: Aspire app host
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+      - name: Build
+        run: dotnet build Lembos.Deploy.slnx
 
   release:
     name: Release

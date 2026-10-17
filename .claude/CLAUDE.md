@@ -11,7 +11,17 @@ helm repo add dandydeveloper https://dandydeveloper.github.io/charts
 helm repo add temporal https://go.temporal.io/helm-charts
 helm dependency build charts/lembos                                   # what Chart.lock pins; needed to render
 helm lint charts/lembos -f charts/lembos/ci/default-values.yaml
+dotnet build Lembos.Deploy.slnx                                       # the getting-started app host
+aspire start / aspire stop                                            # k3s + the published chart; Docker must be up
 ```
+
+The app host installs **this directory's** chart with `aspire/Lembos.Deploy.AppHost/values.aspire.yaml`, at
+`appVersion`, under `*.dev.localhost` with the AppHost's developer certificate, and runs Grafana on
+`http://localhost:3000` (dashboards in `charts/lembos/dashboards`, shipped by the chart too). It uses
+the k3s integration as `Lab.Aspire.Hosting.K3s`, a build of the CommunityToolkit pull request, until a
+release carries it. Its kubeconfig is
+`aspire/Lembos.Deploy.AppHost/.k3s/k3s/local/kubeconfig.yaml`; `source scripts/k3s-env.sh` exports it and adds
+`k` (kubectl in `lembos`) and `lembos-admin-password`.
 
 `.github/workflows/chart.yml` also renders every values file through `kubeconform -strict`; copy its loop to
 reproduce a failure.

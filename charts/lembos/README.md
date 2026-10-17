@@ -25,14 +25,14 @@ to send invitations and password resets, so the chart refuses to render first.
 
 ## Prerequisites
 
-| When                                         | Needs                                                        | Checked by the chart |
-|----------------------------------------------|--------------------------------------------------------------|----------------------|
-| Always                                       | Kubernetes 1.27+, an ingress controller or a Gateway         | —                    |
-| Installing from a checkout                   | `helm dependency build` (fetches `redis-ha`, `temporal-ha`)  | Helm                 |
-| `postgresql.mode: high-available`            | The CloudNativePG operator, 1.25 or later                    | Yes                  |
-| `gateway.enabled`                            | Gateway API CRDs (`gateway.networking.k8s.io/v1`)            | Yes                  |
-| Autoscaling (on in a high-available install) | A metrics server                                             | —                    |
-| `worker.autoscaling.scaler: keda`            | KEDA 2.17 or later                                           | Yes                  |
+| When                                         | Needs                                                       | Checked by the chart |
+|----------------------------------------------|-------------------------------------------------------------|----------------------|
+| Always                                       | Kubernetes 1.27+, an ingress controller or a Gateway        | —                    |
+| Installing from a checkout                   | `helm dependency build` (fetches `redis-ha`, `temporal-ha`) | Helm                 |
+| `postgresql.mode: high-available`            | The CloudNativePG operator, 1.25 or later                   | Yes                  |
+| `gateway.enabled`                            | Gateway API CRDs (`gateway.networking.k8s.io/v1`)           | Yes                  |
+| Autoscaling (on in a high-available install) | A metrics server                                            | —                    |
+| `worker.autoscaling.scaler: keda`            | KEDA 2.17 or later                                          | Yes                  |
 
 **High-available PostgreSQL is a CloudNativePG cluster**, and the operator is the one thing this chart cannot
 bring with it. The chart renders the `Cluster` and the `Database` resources; the operator, installed once per
@@ -81,18 +81,18 @@ thing under `aspire start` and in a cluster.
 
 ## What gets installed
 
-| Component    | Kind                      | Published               | Notes                                                    |
-|--------------|---------------------------|-------------------------|----------------------------------------------------------|
-| Setup job    | Job (pre-install hook)    | —                       | Makes every Secret exist before anything else starts     |
-| Identity     | Deployment                | `identity.<domain>`     | The OIDC issuer. Its admin listener is internal only     |
-| Orchestrator | Deployment                | `orchestrator.<domain>` | `/graphql`, including subscriptions over WebSocket       |
-| Portal       | Deployment                | `portal.<domain>`       | Blazor Server: every session is a WebSocket circuit      |
-| Worker       | Deployment                | —                       | Reached by nobody; a workspace volume per pod            |
-| PostgreSQL   | StatefulSet, or Cluster   | —                       | `postgresql.mode`; HA needs the CloudNativePG operator   |
-| Redis        | StatefulSet, or redis-ha  | —                       | `redis.mode`                                             |
-| Temporal     | auto-setup, or its chart  | —                       | `temporal.mode`                                          |
-| Temporal UI  | Deployment                | `temporal.<domain>`     | Internal unless `temporal.ui.ingress.enabled`            |
-| MailPit      | Deployment                | `mail.<domain>`         | Only with `mailpit.enabled`; catches Identity's mail     |
+| Component    | Kind                     | Published               | Notes                                                  |
+|--------------|--------------------------|-------------------------|--------------------------------------------------------|
+| Setup job    | Job (pre-install hook)   | —                       | Makes every Secret exist before anything else starts   |
+| Identity     | Deployment               | `identity.<domain>`     | The OIDC issuer. Its admin listener is internal only   |
+| Orchestrator | Deployment               | `orchestrator.<domain>` | `/graphql`, including subscriptions over WebSocket     |
+| Portal       | Deployment               | `portal.<domain>`       | Blazor Server: every session is a WebSocket circuit    |
+| Worker       | Deployment               | —                       | Reached by nobody; a workspace volume per pod          |
+| PostgreSQL   | StatefulSet, or Cluster  | —                       | `postgresql.mode`; HA needs the CloudNativePG operator |
+| Redis        | StatefulSet, or redis-ha | —                       | `redis.mode`                                           |
+| Temporal     | auto-setup, or its chart | —                       | `temporal.mode`                                        |
+| Temporal UI  | Deployment               | `temporal.<domain>`     | Internal unless `temporal.ui.ingress.enabled`          |
+| MailPit      | Deployment               | `mail.<domain>`         | Only with `mailpit.enabled`; catches Identity's mail   |
 
 Each service has its own ServiceAccount with no token mounted, a NetworkPolicy, and a
 HorizontalPodAutoscaler and PodDisruptionBudget as `installMode` or its own settings decide.
@@ -129,7 +129,7 @@ can be moved after signing and a signature over a digest cannot:
 cosign verify \
   --certificate-identity-regexp '^https://github.com/lembosproj/platform/\.github/workflows/release\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/lembosproj/platform/orchestrator:0.0.1
+  ghcr.io/lembosproj/platform/orchestrator:0.0.2
 ```
 
 An admission controller that checks signatures (Kyverno, Sigstore's policy controller) takes the same two
@@ -171,14 +171,16 @@ identity:
 
 Every published component answers on `<component>.<global.domain>`, or on `<component>.host` when set.
 Those names are not cosmetic: the OIDC issuer, the redirect URIs and the CORS origins are all derived from
-them, so they have to be the names browsers use.
+them, so they have to be the names browsers use. When browsers reach the ingress on a port other than the
+scheme's default, `global.publicPort` adds it to every one of those origins — and the ingress has to answer
+on that port from inside the cluster too, because the services call Identity there.
 
 The services call Identity at its **public** origin rather than at its Service, because that origin is the
 token issuer they validate. Inside the cluster the name must therefore resolve and its certificate must be
 trusted:
 
 - **Resolution.** Usually the public DNS already does. If not, `global.hostAliases` or a CoreDNS override
-  (as `values-k3s.yaml` does) points it at the ingress controller.
+  (as the getting-started app host does) points it at the ingress controller.
 - **Trust.** A publicly trusted certificate needs nothing. A private CA goes in
   `global.trustedCertificates` (a Secret or ConfigMap, and `keys` to mount only the certificate); the
   services trust it through `SSL_CERT_DIR`.
@@ -309,14 +311,14 @@ fractions of the limits in `worker.resources`, and the workspace volume has `min
 after `reservedDiskPerRunMegabytes` for every run in flight. The first run is admitted on the disk check
 alone. A run held back stays on its Temporal queue — it costs the pod nothing and counts as backlog.
 
-| Value                                          | Default   | Meaning                                                              |
-|------------------------------------------------|-----------|----------------------------------------------------------------------|
-| `worker.maxConcurrentRuns`                     | 4         | The ceiling, whatever the measurements say                           |
-| `worker.capacity.targetCpuUsage`               | 0.8       | Admit while CPU is under this fraction of the pod's quota            |
-| `worker.capacity.targetMemoryUsage`            | 0.8       | Admit while memory is under this fraction of the pod's limit         |
-| `worker.capacity.minimumFreeDiskMegabytes`     | 1024      | Never go below this on the workspace volume                          |
-| `worker.capacity.reservedDiskPerRunMegabytes`  | 512       | What a run in flight may still write                                 |
-| `worker.cacheRetention`                        | 30 days   | Evict cached providers and tool versions no run has used for this    |
+| Value                                         | Default | Meaning                                                           |
+|-----------------------------------------------|---------|-------------------------------------------------------------------|
+| `worker.maxConcurrentRuns`                    | 4       | The ceiling, whatever the measurements say                        |
+| `worker.capacity.targetCpuUsage`              | 0.8     | Admit while CPU is under this fraction of the pod's quota         |
+| `worker.capacity.targetMemoryUsage`           | 0.8     | Admit while memory is under this fraction of the pod's limit      |
+| `worker.capacity.minimumFreeDiskMegabytes`    | 1024    | Never go below this on the workspace volume                       |
+| `worker.capacity.reservedDiskPerRunMegabytes` | 512     | What a run in flight may still write                              |
+| `worker.cacheRetention`                       | 30 days | Evict cached providers and tool versions no run has used for this |
 
 **How many pods there are** is `worker.autoscaling`, on in a high-available install. `scaler: hpa` is a
 HorizontalPodAutoscaler on CPU and memory, which cannot see runs held back for memory or disk. `scaler: keda`
@@ -332,22 +334,24 @@ again.
 
 With `networkPolicy.create` (the default), every pod gets a policy that denies everything it does not list:
 
-| Pod          | Accepts from                                               | Reaches                                                     |
-|--------------|------------------------------------------------------------|-------------------------------------------------------------|
-| Identity     | ingress controller (8080); Worker (admin port)             | DNS, PostgreSQL, Redis, Temporal, SMTP or MailPit, GitHub   |
-| Orchestrator | ingress controller, Portal, Worker (8080)                  | DNS, PostgreSQL, Redis, Temporal, Identity's public origin  |
-| Portal       | ingress controller (8080)                                  | DNS, Redis, Orchestrator, Identity's public origin          |
-| Worker       | nothing                                                    | DNS, Temporal, Orchestrator, Identity admin, `workerEgress` |
-| Setup job    | nothing                                                    | DNS, the API server                                         |
-| PostgreSQL   | Identity, Orchestrator, Temporal                           | nothing                                                     |
-| Redis        | Identity, Orchestrator, Portal                             | nothing                                                     |
-| Temporal     | Identity, Orchestrator, Worker, Temporal UI, itself        | DNS, PostgreSQL, itself                                     |
-| Temporal UI  | ingress controller when published, `temporalWeb.from`      | DNS, Temporal                                               |
-| MailPit      | Identity (1025); ingress controller when published (8080)  | nothing                                                     |
+| Pod          | Accepts from                                              | Reaches                                                     |
+|--------------|-----------------------------------------------------------|-------------------------------------------------------------|
+| Identity     | ingress controller (8080); Worker (admin port)            | DNS, PostgreSQL, Redis, Temporal, SMTP or MailPit, GitHub   |
+| Orchestrator | ingress controller, Portal, Worker (8080)                 | DNS, PostgreSQL, Redis, Temporal, Identity's public origin  |
+| Portal       | ingress controller (8080)                                 | DNS, Redis, Orchestrator, Identity's public origin          |
+| Worker       | nothing                                                   | DNS, Temporal, Orchestrator, Identity admin, `workerEgress` |
+| Setup job    | nothing                                                   | DNS, the API server                                         |
+| PostgreSQL   | Identity, Orchestrator, Temporal                          | nothing                                                     |
+| Redis        | Identity, Orchestrator, Portal                            | nothing                                                     |
+| Temporal     | Identity, Orchestrator, Worker, Temporal UI, itself       | DNS, PostgreSQL, itself                                     |
+| Temporal UI  | ingress controller when published, `temporalWeb.from`     | DNS, Temporal                                               |
+| MailPit      | Identity (1025); ingress controller when published (8080) | nothing                                                     |
 
 Set `networkPolicy.ingressController` to where your ingress controller or Gateway runs, and `networkPolicy.dns`
 to your cluster DNS. The Worker reaches whatever its blueprints name — registries, git hosts, cloud APIs,
-target clusters — so `networkPolicy.workerEgress` allows everything until you narrow it. The high-available
+target clusters — so `networkPolicy.workerEgress` allows everything until you narrow it. With `global.otel.endpoint` set, every
+service may also reach the endpoint's port — 4317 for gRPC, 4318 for HTTP unless the URL names one — wherever
+it resolves, so a collector can run in the cluster or beyond it. The high-available
 PostgreSQL and Redis pods are not given policies by this chart: the CloudNativePG operator must reach its
 instances, and redis-ha has its own `networkPolicy` settings.
 
@@ -356,11 +360,11 @@ instances, and redis-ha has its own `networkPolicy` settings.
 Each of PostgreSQL, Redis and Temporal has a `mode` — `simple`, `high-available` or `external` — which
 follows `installMode` when empty. Only the block the mode names is read:
 
-| Dependency | `simple`                         | `high-available`                                    | `external`                     |
-|------------|----------------------------------|-----------------------------------------------------|--------------------------------|
-| PostgreSQL | `postgresql.simple`: StatefulSet | `postgresql.highAvailable`: CloudNativePG Cluster   | `postgresql.external`          |
-| Redis      | `redis.simple`: StatefulSet      | `redis-ha`: Sentinel, HAProxy in front              | `redis.external`               |
-| Temporal   | `temporal.simple`: auto-setup    | `temporal-ha`: Temporal's official chart            | `temporal.external`            |
+| Dependency | `simple`                         | `high-available`                                  | `external`            |
+|------------|----------------------------------|---------------------------------------------------|-----------------------|
+| PostgreSQL | `postgresql.simple`: StatefulSet | `postgresql.highAvailable`: CloudNativePG Cluster | `postgresql.external` |
+| Redis      | `redis.simple`: StatefulSet      | `redis-ha`: Sentinel, HAProxy in front            | `redis.external`      |
+| Temporal   | `temporal.simple`: auto-setup    | `temporal-ha`: Temporal's official chart          | `temporal.external`   |
 
 [`values-ha.yaml`](./values-ha.yaml) is a high-available install with all three. `redis-ha` and `temporal-ha`
 are upstream charts, dependencies in `Chart.yaml` fetched with `helm dependency build`, which installs exactly
@@ -383,113 +387,159 @@ when they do not.
   ready only once that namespace answers. High-available is the official chart — frontend, history, matching
   and worker as separate Deployments, a schema job and the namespace job; the schema job runs as an ordinary
   Job rather than a hook, so it can wait for a PostgreSQL in the same release. The services speak plain gRPC
-  to the `default` namespace; TLS, API keys and Temporal Cloud are not supported yet.
+  to the `default` namespace; TLS, API keys and Temporal Cloud are not supported yet. The simple server's
+  Prometheus metrics are `temporal.simple.metrics`: a `<release>-temporal-metrics` Service whose type a
+  scraper outside the cluster can reach, and the NetworkPolicy peers allowed to scrape it.
 
 **Release-prefixed names.** Upstream charts cannot read this chart's values, so the names they are given —
 `temporal-ha.server.config.persistence.datastores.*.sql` and `redis-ha.existingSecret` — are written out for
 a release called `lembos` and marked "release-prefixed" in `values.yaml`. Under another release name the
 chart fails at render time naming each value to change and what to change it to.
 
-## Running on a local k3s
+## Grafana dashboards
 
-[`values-k3s.yaml`](./values-k3s.yaml) is a simple install shaped like `aspire start`: one pod per component,
-PostgreSQL and Redis StatefulSets, Temporal's auto-setup server and MailPit, the published images, TLS from
-a CA the setup job generates (`ingress.tls.generate`), Traefik in front, and k3s's built-in NetworkPolicy
-controller enforcing the policies. No operator is needed.
+[`dashboards/`](./dashboards) holds the platform's Grafana dashboards — **Lembos — Platform** for the whole
+install, **Lembos — Service** for one service — and the chart can ship them:
+
+```yaml
+grafanaDashboards:
+  enabled: true          # a ConfigMap per dashboard, labelled grafana_dashboard: "1"
+  namespace: monitoring  # where Grafana's dashboard sidecar looks, when not the release's namespace
+```
+
+Grafana's dashboard sidecar — the one kube-prometheus-stack and the Grafana chart run — loads them from the
+label. Without one, import the JSON files as they are: each asks for a metrics, a logs and a traces data
+source on import, so no data source names are assumed.
+
+They read what an OpenTelemetry pipeline produces when the services export to it (`global.otel.endpoint`):
+
+| Signal  | Expected in | What the queries rely on                                                                                                                                                                       |
+|---------|-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Metrics | Prometheus  | OTLP ingestion with `service.name`, `service.namespace` and the `k8s.*` names promoted to labels; the k8s attributes processor and the kubelet and cluster receivers for the Kubernetes panels |
+| Logs    | Loki 3      | OTLP ingestion, so `service_name` is a label and severity and `trace_id` are structured metadata                                                                                               |
+| Traces  | Tempo       | Its metrics generator writing the service graph and span metrics to the same Prometheus                                                                                                        |
+
+The getting-started app host runs exactly that pipeline; its `observability/` and `otel-agent.yaml` are a
+working configuration to copy.
+
+## Running locally with Aspire
+
+[`aspire/Lembos.Deploy.AppHost`](../../aspire/Lembos.Deploy.AppHost) runs the whole platform on one machine:
+a k3s cluster in a Docker container, this chart installed into it from this directory with Temporal in the
+release, PostgreSQL, Redis and MailPit beside the cluster as Aspire resources — so the chart's `external` modes
+are exercised too — and an OpenTelemetry pipeline into Grafana. Its values are
+[`values.aspire.yaml`](../../aspire/Lembos.Deploy.AppHost/values.aspire.yaml): published images at this
+repository's `appVersion`, Traefik in front
+serving the AppHost's trusted developer certificate, k3s's NetworkPolicy controller enforcing the policies,
+and the Worker autoscaled from one replica to three.
+
+The app host uses the CommunityToolkit k3s integration as `Lab.Aspire.Hosting.K3s`, a build of the pull
+request that adds what it relies on — host aliases, the ingress developer certificate, chart directories —
+until a CommunityToolkit release carries it.
 
 ### What you need
 
-Helm 3, `kubectl`, and a k3s with about 4 CPUs and 8 GiB of memory to spare:
+Docker with about 4 CPUs and 8 GiB of memory to spare, the .NET 10 SDK, the [Aspire CLI](https://aspire.dev)
+with a trusted developer certificate (`aspire certs trust`), and ports 80, 443 and 3000 free. Traefik is
+published on 80 and 443 because `identity.dev.localhost` with no port is the issuer every service validates;
+Grafana is on 3000. `kubectl` is optional, for looking inside; `source scripts/k3s-env.sh` points it at the
+cluster and gives you `k`, `kubectl` in the `lembos` namespace.
 
-- **macOS** — [colima](https://github.com/abiosoft/colima) with Kubernetes:
-
-  ```shell
-  colima start --kubernetes --cpu 4 --memory 8
-  kubectl config use-context colima
-  ```
-
-- **Linux** — [k3s](https://docs.k3s.io/quick-start) itself.
-
-### Install
+### Start
 
 ```shell
-# 1. Fetch the dependencies and install. The images are pulled from GHCR at the chart's appVersion.
-helm repo add dandydeveloper https://dandydeveloper.github.io/charts
-helm repo add temporal https://go.temporal.io/helm-charts
-helm dependency build charts/lembos
-helm upgrade --install lembos charts/lembos -n lembos --create-namespace -f charts/lembos/values-k3s.yaml
-
-# 2. Once per cluster: reload CoreDNS so *.lembos.localhost resolves to Traefik inside the cluster.
-kubectl -n kube-system rollout restart deployment/coredns
-
-# 3. Watch it come up — a few minutes on the first install, most of it pulling images.
-kubectl -n lembos get pods -w
+aspire start          # from the repository root; the dashboard link is printed
 ```
 
-Identity, the Orchestrator and the Worker usually restart once or twice on the first start: they come up
-before PostgreSQL and Temporal accept connections, exit, and are restarted until both do. Everything is
-`Running` and ready within a few minutes.
+| Resource          | What it does                                                                                          |
+|-------------------|-------------------------------------------------------------------------------------------------------|
+| `k3s`             | The cluster. Persistent, with its data and node identity in volumes, so it survives `aspire stop`     |
+| `k3s-dns`         | Makes `postgres`, `redis`, `mailpit` and `otel-collector` resolvable from pods, adds the              |
+|                   | `*.dev.localhost` rewrite, restarts CoreDNS, then exits                                               |
+| `k3s-certificate` | Makes the developer certificate Traefik's default, and stores it in each release's namespace          |
+| `postgres`        | The services' and Temporal's PostgreSQL, with the `identity` and `orchestrator` databases             |
+| `redis`           | The Portal's and Identity's Redis                                                                     |
+| `mailpit`         | Where invitations, confirmations and password resets land                                             |
+| `otel-collector`  | Receives the services' telemetry, reads the cluster's metrics, scrapes Temporal's                     |
+| `lembos`          | `helm upgrade --install` of this chart, then exits — every start applies the current chart and values |
 
-Step 2 is needed because `*.lembos.localhost` would otherwise resolve to each pod's own loopback, and the
-services reach Identity at that name. The values file installs a `coredns-custom` ConfigMap in
-`kube-system`, which k3s's CoreDNS imports; if you already keep one, merge the `lembos.override` entry into
-it instead.
+The first start takes several minutes, most of it pulling images. `lembos` finishes once every pod is
+ready.
 
-### Trust the CA
-
-The certificate every host is served with comes from a CA the setup job generated. Export it and trust it once:
-
-```shell
-kubectl -n lembos get secret lembos-ingress-ca -o jsonpath='{.data.ca\.crt}' | base64 -d > lembos-ca.crt
-# macOS
-sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain lembos-ca.crt
-# Debian or Ubuntu
-sudo cp lembos-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
-```
-
-Firefox keeps its own store: import the file under Settings → Certificates. The CA is kept across upgrades
-like every generated secret, so this is once per cluster rather than once per install.
+**Why `k3s-dns` exists.** Pods resolve names through k3s's CoreDNS, which cannot ask Docker's DNS, so they
+cannot find the Aspire containers by name. The k3s integration looks each one up on the network it shares
+with the cluster and writes the addresses into the `coredns-custom` ConfigMap — so `values.aspire.yaml` sets
+`extraObjects: []`, leaving that ConfigMap to the integration.
 
 ### Sign in
 
-| What        | Where                                           |
-|-------------|-------------------------------------------------|
-| Portal      | `https://portal.lembos.localhost`               |
-| Identity    | `https://identity.lembos.localhost`             |
-| GraphQL     | `https://orchestrator.lembos.localhost/graphql` |
-| Temporal UI | `https://temporal.lembos.localhost`             |
-| MailPit     | `https://mail.lembos.localhost`                 |
+| What        | Where                                        |
+|-------------|----------------------------------------------|
+| Portal      | `https://portal.dev.localhost`               |
+| Identity    | `https://identity.dev.localhost`             |
+| GraphQL     | `https://orchestrator.dev.localhost/graphql` |
+| Temporal UI | `https://temporal.dev.localhost`             |
+| Grafana     | `http://localhost:3000`                      |
+| MailPit     | the `mailpit` resource in the dashboard      |
 
 Sign in as `admin@lembos.local`, with the password the setup job generated:
 
 ```shell
-kubectl -n lembos get secret lembos-secrets -o jsonpath='{.data.identity-admin-password}' | base64 -d; echo
+source scripts/k3s-env.sh     # KUBECONFIG for the app host's cluster, and `k` for kubectl in lembos
+lembos-admin-password         # the identity-admin-password key of lembos-secrets, decoded
 ```
 
-Invitations, confirmations and password resets land in MailPit.
+### Observing it
 
-### After a change
+The services export traces, metrics and logs over OTLP (`global.otel.endpoint`) straight to `otel-collector`
+beside the cluster, each signal already naming its pod, Deployment and node (the chart sets them as resource
+attributes). The collector reads the cluster's state and the kubelet's resource usage through the API server
+with the cluster's kubeconfig, scrapes Temporal's server metrics through the `lembos-temporal-metrics` Service
+(`temporal.simple.metrics`, published on the node by the service load balancer), and routes each signal to its
+store: traces to Tempo, logs to Loki, metrics to Prometheus. Grafana reads all three,
+linked to each other — an exemplar or a log line opens its trace, and a trace opens its logs.
+
+| Dashboard             | What it answers                                                                                                                                                                                                                  |
+|-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Lembos — Platform** | Is the platform healthy? Request rate, errors and latency per service, workflow triggers and Temporal, pod CPU and memory, restarts, the Worker autoscaler, .NET runtime, logs by level, the service map, failed and slow traces |
+| **Lembos — Service**  | Where is one service spending its time? Rate, status and latency per route, its pods, its runtime, its logs and traces                                                                                                           |
+| **Lembos — Temporal** | Is Temporal keeping up? Request rate and errors, persistence latency, task queue backlog and schedule-to-start latency, workflow outcomes                                                                                        |
+
+The dashboards are the chart's own ([Grafana dashboards](#grafana-dashboards)), mounted from `dashboards/`;
+edit one in Grafana and export the JSON back there to keep the change. Metrics arrive every 60 seconds, so rates are taken
+over several minutes and a fresh start takes a couple of minutes to fill in.
+
+### The Worker's autoscaler
+
+`values.aspire.yaml` turns on the HorizontalPodAutoscaler, between one and three Workers on CPU. Watch it on
+the platform dashboard, or:
 
 ```shell
-# The setup job runs again and keeps every secret it made.
-helm upgrade lembos charts/lembos -n lembos -f charts/lembos/values-k3s.yaml
+k get hpa,pods -l app.kubernetes.io/component=worker -w
 ```
 
-A different platform release is `--set global.image.tag=<version>`.
+### Another platform release, or a changed value
+
+`aspire stop`, then change `appVersion` in `Chart.yaml`, a template, or a value in either file, and
+`aspire start` again: the `lembos` resource upgrades the release from this directory, and the setup job keeps
+every secret it made.
 
 ### Tear down
 
 ```shell
-helm uninstall lembos -n lembos                # keeps the generated secrets and the data volumes
-kubectl delete namespace lembos                # everything, the CA included — trust the new one next time
+aspire stop                                    # the cluster, the dependencies and the stores keep running
+docker rm -f $(docker ps -aq --filter name=k3s- --filter name=postgres- --filter name=redis- --filter name=mailpit- \
+  --filter name=otel-collector- --filter name=prometheus- --filter name=loki- --filter name=tempo- --filter name=grafana-)
+docker volume ls | grep -E 'lembos.deploy|lembos-deploy'   # the volumes left behind; remove them for a fresh start
 ```
 
 ### When something is wrong
 
-| Symptom                                               | Look at                                                                       |
-|-------------------------------------------------------|-------------------------------------------------------------------------------|
-| A pod is not ready after several minutes              | `kubectl -n lembos logs deploy/lembos-<component>` (or `lembos-postgresql-0`) |
-| The install fails before anything starts              | `kubectl -n lembos logs job/lembos-setup` — the setup job's own report        |
-| Sign-in fails with a TLS or connection error in a pod | CoreDNS was not restarted (step 3), so the name resolves to the pod itself    |
-| The browser warns about the certificate               | The CA is not trusted yet, or a new one was generated after a full teardown   |
-| Mail never arrives                                    | MailPit at `https://mail.lembos.localhost`; nothing leaves the cluster        |
+| Symptom                                    | Look at                                                                       |
+|--------------------------------------------|-------------------------------------------------------------------------------|
+| `lembos` fails after ten minutes           | `k get pods`, then the logs of whichever is not ready                         |
+| A service cannot reach PostgreSQL or Redis | The `k3s-dns` logs: each `<name> -> <address>` it wrote                       |
+| The install fails before anything starts   | `k logs job/lembos-setup` — the setup job's own report                        |
+| Nothing answers on `*.dev.localhost`       | Something else holds 80 or 443, so the `k3s` container could not publish them |
+| The browser warns about the certificate    | The developer certificate is not trusted yet: `aspire certs trust`            |
+| A dashboard panel says "No data"           | Nothing has happened yet — no 5xx, no failed trace — or the first minutes     |

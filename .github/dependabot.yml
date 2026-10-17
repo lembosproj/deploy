@@ -6,3 +6,14 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+
+  # The getting-started app host. The Aspire packages move together, and with the platform's own app host.
+  - package-ecosystem: nuget
+    directory: "/aspire/Lembos.Deploy.AppHost"
+    schedule:
+      interval: weekly
+    groups:
+      Aspire:
+        patterns:
+          - "Aspire.*"
+          - "CommunityToolkit.Aspire.*"
