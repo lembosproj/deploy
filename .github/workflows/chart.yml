@@ -67,7 +67,7 @@ jobs:
       # added, or renamed, cannot sit unknown to the chart: scripts/sync-platform-schema.sh refreshes the copy.
       # A release that published no contract has nothing to compare, which is said rather than failed; the
       # chart's own release fails on it, below.
-      - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
+      - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4 # v2.0.2
       - name: Compare the platform contract
         run: |
           version="$(yq '.appVersion' charts/lembos/Chart.yaml)"
@@ -97,7 +97,7 @@ jobs:
           echo "app=$(yq '.appVersion' charts/lembos/Chart.yaml)" >> "$GITHUB_OUTPUT"
       # The chart names these by default; publishing it before they exist would publish a chart that cannot
       # pull what it installs. Anonymous on purpose: a cluster pulls them without credentials too.
-      - uses: oras-project/setup-oras@22ce207df3b08e061f537244349aac6ae1d214f6 # v1.2.4
+      - uses: oras-project/setup-oras@005458ad77f1c8facd38a094e4af2e69e5607ff4 # v2.0.2
       - name: Platform images and contract exist
         env:
           APP_VERSION: ${{ steps.versions.outputs.app }}
